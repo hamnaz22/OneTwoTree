@@ -1,0 +1,10 @@
+Cluster_13  = 1-879, representative annotation: ITS
+Cluster_2  = 880-1901, representative annotation: Narcissus yepesii isolate YEP.CIA.1 ATP synthase alpha subunit (atpA) gene partial cds; mitochondrial
+Cluster_3  = 1902-2879, representative annotation: Narcissus yepesii isolate YEP.CIA.1 apocytochrome b (COB) gene partial cds; mitochondrial
+Cluster_1  = 2880-3617, representative annotation: Narcissus gaditanus isolate G.BEN.1 NADH dehydrogenase subunit F (ndhF) gene partial cds; chloroplast
+Cluster_4  = 3618-4164, representative annotation: Narcissus tingitanus isolate TIN.TNG.1 maturase K (matK) gene partial cds; chloroplast
+Cluster_5  = 4165-5146, representative annotation: Narcissus calcicola tRNA-Leu (trnL) gene partial sequence; trnL-trnF intergenic spacer complete sequence; and tRNA-Phe (trnF) gene partial sequence; chloroplast
+Cluster_6  = 5147-6968, representative annotation: Narcissus bicolor maturase (matK) gene complete cds
+Cluster_7  = 6969-8039, representative annotation: Narcissus albimarginatus trnT-trnL intergenic spacer partial sequence; chloroplast
+Cluster_8  = 8040-8466, representative annotation: Narcissus tazetta trnL-trnF intergenic spacer and tRNA-Phe (trnF) gene partial sequence; chloroplast
+Cluster_9  = 8467-9400, representative annotation: Narcissus fernandesii voucher LISI-463.1/2012 NADH dehydrogenase subunit F (nadhF) gene partial cds; chloroplast

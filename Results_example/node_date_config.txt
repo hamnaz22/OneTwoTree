@@ -1,0 +1,7 @@
+treefile = /bioseq/data/results/oneTwoTree/1524727033/SummaryDir/Result_Tree_1524727033_NotUltra.tre
+smooth = 100
+numsites = 9400
+mrca = NODE_LBL Narcissus_scaberulus Lapiedra_martinezii
+min = NODE_LBL 1
+max = NODE_LBL 1
+outfile = /bioseq/data/results/oneTwoTree/1524727033/SummaryDir/Result_Tree_1524727033.tre

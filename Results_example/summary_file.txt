@@ -1,0 +1,3 @@
+Species with data in Genbank: 69
+Selected Outgroup: Lapiedra_martinezii
+Species in final alignment file: 69
