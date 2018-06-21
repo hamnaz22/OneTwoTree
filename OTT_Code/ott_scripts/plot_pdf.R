@@ -8,7 +8,10 @@ for(i in 1:length(args)){
 
 require(ape)
 setwd(working_dir)
-tree = read.tree(tree)
+tree = try(read.tree(tree_file))
+if (inherits(tree,"try-error")){
+	tree = read.nexus(tree_file)
+}
 
 t = "phylogram"
 if (length(tree$tip.label) > 150){
