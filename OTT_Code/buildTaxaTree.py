@@ -260,6 +260,12 @@ def make_nexus_msa_and_web_partition(context):
 
 #--------------------------------------------------------------------------------------------------------------
 def Create_Tree(context,f_end_status_name):
+
+	if context.UserOutgroupInMSA == False:
+		statusFail_LogFile(context,
+					   'The User Outgroup you specified was not included in the final MSA and so OneTwoTree did not reconstruct a phylogeny.')
+		return
+
 	Tree_Method = context.UserFlags_dict['Tree_Method']
 	Tree_Type = context.UserFlags_dict['Tree_Type'] #Concat or Per cluster/Locus
 	if Tree_Type == 'ConcatTree':
@@ -333,6 +339,7 @@ def Write_Selected_Clusters_data_File(context, merged_dict):
 	#For Merged clusters we need to calculate New data:
 	for line in f_origin_clusters:
 		logger.debug(line)
+		line = line.replace('"no"', '"yes"')
 		line_split = line.split(',')
 		cluster_id = line_split[0].replace('"', '')
 		logger.debug("Check if cluster %s was selected" % cluster_id)
@@ -453,10 +460,10 @@ def Rerun_flow(rerunJobID, context):
 					if os.path.exists(context.UserFlags_dict['OriginJobDir'] + '/' + str(cluster_index) + '/' + clustType):
 						context.rerun_chosen_clusters.append(cluster_index)
 	if not context.rerun_chosen_clusters:
-		logger.info("Rerun - List of Clusters is empty, choose all clusters")
+		logger.info("Rerun - List of Clusters is empty")
 		#Write to final status:
 		with open(working_dir + '/SummaryDir/FinalStatus.txt', 'w') as sum_Status_f:
-			sum_Status_f.write("No clusters were selected for the rerun, try again")
+			sum_Status_f.write("No clusters were selected for the rerun (might be cluster type chosen is missing from original analysis)")
 			return
 	else:
 		logger.info("Rerun - List of Clusters chosen by the user: %s" % context.rerun_chosen_clusters)
@@ -494,7 +501,7 @@ def Rerun_flow(rerunJobID, context):
 						  context, curr_cluster_dir)
 		if context.UserFlags_dict['FilterMSA_Method'] != 'None':
 			msa_file = curr_cluster_dir+ "/seqs-aligned-concat.fasta"
-			perform_filter_msa(ploidb_context, msa_file)
+			perform_filter_msa(context, msa_file)
 		#Check if MSA filter method was chosen (default is none)
 		if context.UserFlags_dict['FilterMSA_Method'] != 'None':
 			MSA_filter_method = context.UserFlags_dict['FilterMSA_Method']
@@ -1192,20 +1199,23 @@ def concat_alignment_rerun(context):
 	indexFileName_Origin = context.UserFlags_dict['OriginJobDir'] + '/concat/fasta-files-to-concat.txt'
 	indexFileName = context.fasta_files_list_to_concat
 	f_origin_concat_list = open(indexFileName_Origin, 'r')
+	# Corection of concat files - instead of copy from origin, write according to cluster list seqs-organism-concat.fasta
 	with open(indexFileName, "w") as handle:
-		for line in f_origin_concat_list:
-			r = re.compile('concat/(.*?)/')
-			logger.info("Searching for cluster number r -> %s" % r)
-			m = r.search(line)
-			logger.info("Searching for cluster number m -> %s" % m)
-			if m:
-				clust_num = m.group(1)
-				if clust_num in context.rerun_chosen_clusters:
-					logger.info("cluster %s is included in rerun" % clust_num)
-					new_line = line.replace(context.UserFlags_dict['OriginJobDir'], context.working_dir)
-					logger.debug(line)
-					logger.debug(new_line)
-					handle.write(new_line)
+		for clust_id in context.rerun_chosen_clusters:
+			handle.write(context.concat_workdir+'/'+str(clust_id)+'/seqs-organism-concat.fasta\n')
+		#for line in f_origin_concat_list:
+		#	r = re.compile('concat/(.*?)/')
+		#	logger.info("Searching for cluster number r -> %s" % r)
+		#	m = r.search(line)
+		#	logger.info("Searching for cluster number m -> %s" % m)
+		#	if m:
+		#		clust_num = m.group(1)
+		#		if clust_num in context.rerun_chosen_clusters:
+		#			logger.info("cluster %s is included in rerun" % clust_num)
+		#			new_line = line.replace(context.UserFlags_dict['OriginJobDir'], context.working_dir)
+		#			logger.debug(line)
+		#			logger.debug(new_line)
+		#			handle.write(new_line)
 
 	#run_dos2unix(indexFileName)
 	concatAlignPAth = ott_config['general']['OTT_MAIN'] + '/ott_scripts'
@@ -1231,6 +1241,7 @@ def concat_alignment_SingleOutgroup(context):
 	logger.debug("Chloroplast: " + dict_clusterMode[ChloroClusterMode])
 
 	indexFileName = context.fasta_files_list_to_concat
+	list_clusters_to_include=[]
 	with open(indexFileName, "w") as handle:
 		#This section will decide which clusters to concat: default is to use all clusters separately:
 		if NucClusterMode == 1:
@@ -1238,6 +1249,9 @@ def concat_alignment_SingleOutgroup(context):
 				aligned_fasta_filname = cluster_context.all_seqs_for_concat_tree_creation_fasta_filename
 				logger.debug("Writing %s to %s" % (aligned_fasta_filname, indexFileName))
 				handle.write(aligned_fasta_filname + "\n")
+				cluster_number = get_clusterNum_from_path(aligned_fasta_filname)
+				logger.debug("added cluster number %s to final msa" %cluster_number)
+				list_clusters_to_include.append(cluster_number)
 		elif (context.Nuc_cluster is not None) and (NucClusterMode == 2):
 			logger.debug("Adding %s to concat " % context.concat_by_type_fastas[SeqType.Nuc])
 			handle.write(context.concat_by_type_fastas[SeqType.Nuc] + "\n")
@@ -1247,6 +1261,9 @@ def concat_alignment_SingleOutgroup(context):
 				aligned_fasta_filname = cluster_context.all_seqs_for_concat_tree_creation_fasta_filename
 				logger.debug("Writing %s to %s" % (aligned_fasta_filname, indexFileName))
 				handle.write(aligned_fasta_filname + "\n")
+				cluster_number = get_clusterNum_from_path(aligned_fasta_filname)
+				logger.debug("added cluster number %s to final msa" % cluster_number)
+				list_clusters_to_include.append(cluster_number)
 		elif (context.Mt_cluster is not None) and (MtClusterMode == 2):
 			logger.debug("Adding %s to concat " % context.concat_by_type_fastas[SeqType.Mt])
 			handle.write(context.concat_by_type_fastas[SeqType.Mt] + "\n")
@@ -1256,10 +1273,31 @@ def concat_alignment_SingleOutgroup(context):
 				aligned_fasta_filname = cluster_context.all_seqs_for_concat_tree_creation_fasta_filename
 				logger.debug("Writing %s to %s" % (aligned_fasta_filname, indexFileName))
 				handle.write(aligned_fasta_filname + "\n")
+				cluster_number = get_clusterNum_from_path(aligned_fasta_filname)
+				logger.debug("added cluster number %s to final msa" % cluster_number)
+				list_clusters_to_include.append(cluster_number)
 		elif (context.chloroplast_cluster is not None) and (ChloroClusterMode == 2):
 			logger.debug("Adding %s to concat " % context.concat_by_type_fastas[SeqType.Chloroplast])
 			handle.write(context.concat_by_type_fastas[SeqType.Chloroplast] + "\n")
 
+	# Need to update clusters table with clusters that are not chosen for the final alignment:
+	f_summary_clusters_temp = open(context.summary_clusters_data_file +'_temp', 'w')
+	logger.debug("Check if cluster was chosen by user (according to Genome Type selection):")
+	logger.debug(list_clusters_to_include)
+	with open(context.summary_clusters_data_file,'r') as summary_clusters_f:
+		for line in summary_clusters_f:
+			line_split = line.split(',')
+			logger.debug(line_split)
+			remove_p = line_split[0].replace('"','')
+			logger.debug(remove_p)
+			if remove_p in list_clusters_to_include or 'ClusterID' in remove_p:
+				f_summary_clusters_temp.write(line)
+			else:
+				no_line = line.replace('"yes"','"no"')
+				f_summary_clusters_temp.write(no_line)
+	f_summary_clusters_temp.close()
+	os.remove(context.summary_clusters_data_file)
+	shutil.copyfile(context.summary_clusters_data_file +'_temp',context.summary_clusters_data_file)
 
 	#run_dos2unix(indexFileName)
 	concatAlignPAth = ott_config['general']['OTT_MAIN'] + '/ott_scripts'
@@ -1338,6 +1376,7 @@ def UpdateContextFlags(context):
 		context.UserFlags_dict[flag_name] = flag_val
 		logger.debug("Flag: %s is: %s" % (flag_name, flag_val))
 
+	context.UserFlags_dict["ConstraintTree"] = 'None'
 	context.Nuc_clusterMode = calc_clustMethod(context.UserFlags_dict['include_Nuc'])
 	context.Mt_clusterMode = calc_clustMethod(context.UserFlags_dict['include_Mt'])
 	context.Chloro_clusterMode = calc_clustMethod(context.UserFlags_dict['include_CP'])
@@ -1366,6 +1405,14 @@ def UpdateContextFlags(context):
 					with open(context.final_status, 'a') as f_status:
 						f_status.write("Failed - %s \n" % status_line)
 					raise Exception("Failed - User outgroup name must be a species and not high ranked taxa")
+
+	if context.UserFlags_dict['Outgroup_Flag'] == 'User':
+		#Check user entered User name outgroup:
+		if 'Outgroup_User' not in context.UserFlags_dict.keys():
+			status_line = 'User outgroup name was not entered.'
+			with open(context.final_status, 'a') as f_status:
+				f_status.write("Failed - %s \n" % status_line)
+			raise Exception("Failed - User outgroup name was not entered.")
 
 	logger.info(context.UserFlags_dict)
 
@@ -1516,20 +1563,24 @@ def cluster_sequences_file_with_orthomcl(fasta_seq_filename, id, scripts_path, g
 										 context):
 	if (context.its_support):
 		logger.info("ITS is ON - running ITS clustering")
+		if os.path.exists(context.cluter_its_dir + '/oneSeqPerSpecies.msa'):
+			logger.info("Cluster ITS output exists --> skip its clustering stage")
+			fasta_without_its = os.path.join(output_dir, context.id + "-allseq-no-its.fasta")
+			fasta_file_to_split = fasta_without_its
+		else:
+			# For the non ITS clusters
+			fasta_without_its = os.path.join(output_dir, context.id + "-allseq-no-its.fasta")
+			remove_its_command = "perl " + scripts_path + "getSeqsWithoutITS.pl " + fasta_seq_filename + " " + fasta_without_its
+			logger.info("Calling getSeqsWithoutITS (for ITS removal) - " + remove_its_command)
 
-		# For the non ITS clusters
-		fasta_without_its = os.path.join(output_dir, context.id + "-allseq-no-its.fasta")
-		remove_its_command = "perl " + scripts_path + "getSeqsWithoutITS.pl " + fasta_seq_filename + " " + fasta_without_its
-		logger.info("Calling getSeqsWithoutITS (for ITS removal) - " + remove_its_command)
+			exec_external_command_redirect_output(command_to_exec=remove_its_command,
+												  outfile=output_dir + "/getSeqsWithoutITS.out",
+												  errfile=output_dir + "/getSeqsWithoutITS.err")
 
-		exec_external_command_redirect_output(command_to_exec=remove_its_command,
-											  outfile=output_dir + "/getSeqsWithoutITS.out",
-											  errfile=output_dir + "/getSeqsWithoutITS.err")
-
-		fasta_file_to_split = fasta_without_its
-		# This is for the ITS clusters
-		cluster_ITS(context, fasta_seq_filename, context.cluster_script_dir + "/clustering/", gb_seq_filename)
-
+			fasta_file_to_split = fasta_without_its
+			# This is for the ITS clusters
+			cluster_ITS(context, fasta_seq_filename, context.cluster_script_dir + "/clustering/", gb_seq_filename)
+	#ITS is off:
 	else:
 		logger.info("ITS is OFF - will not cluster use specific ITS clustering")
 		fasta_file_to_split = fasta_seq_filename
@@ -2183,17 +2234,20 @@ def perform_filter_ITS_msa(ploidb_context, msa_file):
 
 #New outgroup flow: Michal 2017
 def process_seq_and_create_concat_file(context, genus_name, outgrouup_selection):
+
 	if outgrouup_selection == 'None':
 		logger.info("No Outgroup selection for  " + genus_name)
-		init_NO_common_outgroup(context, outgrouup_selection)
+		#init_NO_common_outgroup(context, outgrouup_selection)
+		init_NO_common_outgroup_MDebug(context, outgrouup_selection)
 	#elif context.UserFlags_dict['Outgroup_User'] != 'None':
 	elif 'Outgroup_Flag' in context.UserFlags_dict:
 		if context.UserFlags_dict['Outgroup_Flag'] == 'User':
 			logger.info("Outgroup selected by the user: %s " % context.UserFlags_dict['Outgroup_User'])
-			init_NO_common_outgroup(context, context.UserOutgroupName)
+			init_NO_common_outgroup_MDebug(context, context.UserOutgroupName)
 		elif context.UserFlags_dict['Outgroup_Flag'] == 'Single':
 			logger.info("Initializing common outgroup  for  " + genus_name)
-			init_common_outgroup(context)
+			#init_common_outgroup(context)
+			init_common_outgroup_MDebug(context)  # Same cluster selection process
 
 	# For Outgroup option, check if seqs are ready:
 	if is_seqs_for_concat_tree_exists(context):
@@ -2522,7 +2576,7 @@ def create_Tree_diffMethods(f_stat_check, Tree_Method, context):
 		final_tree_pdf = context.summary_dir + '/Result_Tree_' + context.id + '.pdf'
 		scripts_dir =  ott_config['general']['OTT_MAIN'] + 'ott_scripts/'
 		r_path = ott_config['diff_soft']['R_PATH']
-		createPdfTree_Rcmd = (r_path + " CMD BATCH '--args working_dir=" + '"' + context.summary_dir + '"' + " tree=" + '"'
+		createPdfTree_Rcmd = (r_path + " CMD BATCH '--args working_dir=" + '"' + context.summary_dir + '"' + " tree_file=" + '"'
 		+ final_tree + '"' + " output=" + '"' + final_tree_pdf + '"' + "' " + scripts_dir + "plot_pdf.R")
 		logger.debug("R script to create pdf file: %s" %createPdfTree_Rcmd)
 		exec_external_command_redirect_output(createPdfTree_Rcmd)
@@ -2538,17 +2592,6 @@ def create_Tree_diffMethods(f_stat_check, Tree_Method, context):
 
 	return
 
-
-def statusFail_LogFile(context, status_line):
-	logger.info(
-		"=======================================================================================================")
-	logger.info("===                 %s	         " % status_line)
-	logger.info(
-		"=======================================================================================================")
-	#Result indication file:
-	with open(context.final_status, 'a') as f_status:
-		f_status.write("Failed - %s \n" % status_line)
-	return
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2667,6 +2710,19 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 	#Check if Alignment is done - continue to TreeGen:
 	f_stat_check = context.debug_dir + '/AlignEnd_FinishedExecutionWithConcatFile'
 
+	#Check if list of clusters is ready and perform concat:
+	indexFileName = context.fasta_files_list_to_concat
+	if os.path.exists(indexFileName):
+		logger.debug("Found %s file, perform concat alignment...")
+		concatAlignPAth = ott_config['general']['OTT_MAIN'] + '/ott_scripts'
+		concat_align_command = "perl " + concatAlignPAth + "/ConcateAlignments.pl %s %s %s NO NA NA" % \
+														   (indexFileName, context.concat_seqs_fasta_filename,
+															context.concat_seqs_report_filename)
+		exec_external_command_redirect_output(concat_align_command, context.concat_log_out_filename,
+											  context.concat_log_err_filename)
+		with open(f_stat_check,'w') as f_stat:
+			f_stat.close()
+
 	#try:
 	if os.path.exists(f_stat_check):
 		context.outgroupSelection = rerun_get_selected_outgroup(context.working_dir + "/OutgroupSelection.txt")
@@ -2741,12 +2797,13 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 			f_time_calc.write(' ')
 			f_time_calc.close()
 		return
-	if len(context.species_list_ids) < 5:
-		statusFail_LogFile(context, 'Less than 5 species found')
-		with open(context.working_dir+'/calc_time_vars.txt','w') as f_time_calc:
-			f_time_calc.write(' ')
-			f_time_calc.close()
-		return
+	# MD: checking the min cutoff for species number (need to coun also large species)
+	#if len(context.species_list_ids) < 5:
+	#	statusFail_LogFile(context, 'Less than 5 species found')
+	#	with open(context.working_dir+'/calc_time_vars.txt','w') as f_time_calc:
+	#		f_time_calc.write(' ')
+	#		f_time_calc.close()
+	#	return
 
 	# ------------------------------------
 	# Checking if species list length is not to long:
@@ -2772,6 +2829,9 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 		get_taxa_sequences(context, context.species_list_ids, fasta_filename=context.fasta_seq_filename,
 						   gb_filename=context.gb_seq_filename, p=p)
 	logger.info("DONE Getting sequences data for taxa")
+	logger.info("Remove cd-hit directory")
+	if os.path.exists(context.working_dir + '/CD_Hit_dir'):
+		shutil.rmtree(context.working_dir + '/CD_Hit_dir')
 
 	#Update file with all TaxIds without Data in Genbank (wither they don't exist or they are of higher rank type:
 	with open(context.TaxId_NoData_list_file,'a') as f_NoData:
@@ -2856,13 +2916,13 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 	logger.debug(len(context.cluster_contexts))
 
 	# ------------------------------------
-
-	if not verify_cluster_data_is_enough(context, init_check=True):
-		statusFail_LogFile(context, 'Less than 5 species after merge operation')
-		with open(context.working_dir+'/calc_time_vars.txt','w') as f_time_calc:
-			f_time_calc.write(' ')
-			f_time_calc.close()
-		return
+	# MD: checking the min cutoff for species number (need to coun also large species)
+	#if not verify_cluster_data_is_enough(context, init_check=True):
+	#	statusFail_LogFile(context, 'Less than 5 species after merge operation')
+	#	with open(context.working_dir+'/calc_time_vars.txt','w') as f_time_calc:
+	#		f_time_calc.write(' ')
+	#		f_time_calc.close()
+	#	return
 
 	# ------------------------------------
 
@@ -2901,10 +2961,10 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 				logger.info("ITS final cluster was empty and was not added")
 
 	# ------------------------------------
-
-	if not verify_cluster_data_is_enough(context, init_check=True):
-		statusFail_LogFile(context, 'Less than 5 species after merge operation')
-		return
+	# MD: checking the min cutoff for species number (need to coun also large species)
+	#if not verify_cluster_data_is_enough(context, init_check=True):
+	#	statusFail_LogFile(context, 'Less than 5 species after merge operation')
+	#	return
 
 	# ------------------------------------
 
@@ -2926,9 +2986,9 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 
 	context.init_cluster_contexts_for_loci_trees_list()
 
-	if not verify_cluster_data_is_enough(context):
-		statusFail_LogFile(context, 'Not enough data in clusters')
-		return
+	#if not verify_cluster_data_is_enough(context):
+	#	statusFail_LogFile(context, 'Not enough data in clusters')
+	#	return
 
 
 	#---------------------------------------------------------------------
@@ -2939,6 +2999,11 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 		Check_and_Add_LargeTaxIds(context)
 	else:
 		logger.debug("No Large species fasta file")
+
+	# MD: This check was moved here so it will perform the min species per cluster after the large species were added:
+	if not verify_cluster_data_is_enough(context):
+		statusFail_LogFile(context, 'Less than 5 taxa were selected for each cluster.')
+		return
 
 	#Copy to Summary Directory:
 	if os.path.exists(context.largeSpeciesDir + '/LOG_blastall.txt'):
@@ -2954,6 +3019,10 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 	##############################################################################
 	# Concatenating the alignments
 	##############################################################################
+
+	#Selecting clusters
+	select_clusters_for_final_concat(context, "NoOutgroupYet")
+
 
 	logger.info(
 		"=======================================================================================================")
