@@ -23,6 +23,19 @@ from ott_scripts.NR_NameMatch import do_resolve_names
 __author__ = 'Moshe'
 
 #--------------------------------------------------------------------------------------------------------
+def statusFail_LogFile(context, status_line):
+	logger.info(
+		"=======================================================================================================")
+	logger.info("===                 %s	         " % status_line)
+	logger.info(
+		"=======================================================================================================")
+	# Result indication file:
+	with open(context.final_status, 'a') as f_status:
+		f_status.write("Failed - %s \n" % status_line)
+	return
+
+
+#--------------------------------------------------------------------------------------------------------
 def get_organism_from_fasta(file_toMergeTo):
 	species_list = []
 	with open(file_toMergeTo, "rU") as main_f:
@@ -2380,9 +2393,20 @@ def Rerun_Clustering(context):
 	context.init_cluster_contexts_for_loci_trees_list()
 
 	if not verify_cluster_data_is_enough(context):
-		statusFail_LogFile(context, 'Not enough data in clusters')
+		statusFail_LogFile(context, 'Less than 5 taxa were selected for each cluster.')
 		return
 
 	return
 
 # -------------------------------------------------------------------------------------------------------
+#This function will return the accession number of the sequence according to ID:
+def get_clusterNum_from_path(path_str):
+
+	#get accesion id from line like: gi|AF318735.1|taxonid|151425|organism|Prunus
+	r = re.compile('concat\/(.*?)\/seqs-organism-concat')
+	m = r.search(path_str)
+	if m:
+		return m.group(1)
+	else:
+		logger.debug("FAILED to find cluster number in path")
+#-------------------------------------------------------------------------------------------------------

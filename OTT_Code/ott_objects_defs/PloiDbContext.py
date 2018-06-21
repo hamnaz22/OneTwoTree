@@ -38,6 +38,7 @@ class PloiDbContext:
         self.chloroplast_cluster = None
         self.Mt_cluster = None
         self.Nuc_cluster = None
+        self.UserOutgroupInMSA = True
         self.ClusterType_dict = dict()
         self.gb_seqs_dict = None
         self.gbDict = None

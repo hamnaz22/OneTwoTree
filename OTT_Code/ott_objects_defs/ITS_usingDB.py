@@ -19,6 +19,21 @@ from pandas import Series
 __author__ = 'ItayM3'
 
 #-------------------------------------------------------------------------------------------------------
+def prepare_files_for_concat(indexIts12FileName):
+
+	with open(indexIts12FileName,'r') as f_list:
+		for line in f_list:
+			file_name_path = line.strip()
+			in_fasta_filename = file_name_path
+			out_organism_desc_fasta_filename = file_name_path+'_edit'
+			rewrite_fasta_with_organism_name_as_desc(in_fasta_filename, out_organism_desc_fasta_filename, add_gi=False)
+			shutil.copyfile(out_organism_desc_fasta_filename,file_name_path)
+			logger.debug("File %s headers edited to be organism only" %file_name_path)
+
+	return
+
+
+#-------------------------------------------------------------------------------------------------------
 def is_empty_file(f_handle):
 
 	for line in f_handle:
@@ -276,7 +291,7 @@ def createMergedSeqObj_py(seq1Obj, seq2Obj, mergedSeq):
 # append two given sequences (not aligned to each other)
 def appendSequences(seq1Obj, seq2Obj):
 
-	appendedSeq = seq1Obj.seq + seq2Obj.seq
+	appendedSeq = str(seq1Obj.seq + seq2Obj.seq)
 	appendedSeqObj = createMergedSeqObj_py(seq1Obj, seq2Obj, appendedSeq)
 
 	return appendedSeqObj
@@ -295,7 +310,7 @@ def mergeSequences(seq1Obj, seq2Obj):
 			mergedSeq_list.append(seq1Obj.seq[indx])
 		indx+=1
 
-	merged_seq = ''.join(mergedSeq_list)
+	merged_seq = str(''.join(mergedSeq_list))
 	mergedSeqObj = createMergedSeqObj_py(seq1Obj, seq2Obj, merged_seq)
 
 	return mergedSeqObj
@@ -361,11 +376,17 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 	# no combined sequences
 	else:
 		# MSA for ITS1 sequences (if more than one exist)
+		indexIts12FileName  = OutDir + '/ITS_1_2_msa_index.txt'
+		with open(indexIts12FileName,'w') as f_index_its:
+			f_index_its.write("%s/ITS1_only.msa\n" %OutDir)
+			f_index_its.write("%s/ITS2_only.msa\n" %OutDir)
+		f_index_its.close()
+
 		if (ITS1count > 1):
 			adjustDirScript = ott_config['general']['OTT_MAIN']+'/ott_scripts/adjustDirFasta.py'
 			f_msa_its.write("Calling: python %s -i %s\n" %(adjustDirScript,ITS1Fasta))
 			os.system("python %s -i %s" %(adjustDirScript,ITS1Fasta))
-			os.system("mafft --auto 0 --ep 0.000000 %s > %s/ITS1_only.msa" %(ITS1Fasta,OutDir))
+			os.system("mafft --auto %s > %s/ITS1_only.msa" %(ITS1Fasta,OutDir))
 			# system "mafft --retree 2 --maxiterate 0 --bl 62 --op 1.530000 --ep 0.000000 $ITS1Fasta > OutDir/ITS1_only.msa" ; #-bl 62 , --op 1.530000 -> is default, --ep 0.000000 allows large gaps !!!
 			outputFileName = OutDir + "/ITS1_only.msa"
 		elif(ITS1count == 1):
@@ -376,12 +397,21 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 			adjustDirScript = ott_config['general']['OTT_MAIN']+'/ott_scripts/adjustDirFasta.py'
 			f_msa_its.write("Calling: python %s -i %s\n" %(adjustDirScript,ITS2Fasta))
 			os.system("python %s -i %s" %(adjustDirScript,ITS2Fasta))
-			os.system("mafft --auto 0 --ep 0.000000 %s > %s/ITS2_only.msa" %(ITS2Fasta,OutDir))
+			#os.system("mafft --auto 0 --ep 0.000000 %s > %s/ITS2_only.msa" %(ITS2Fasta,OutDir))
+			os.system("mafft --auto %s > %s/ITS2_only.msa" %(ITS2Fasta,OutDir))
 
 			if outputFileName != 'None':
 				os.system("cat %s > %s/SEP_ITS1+ITS2.msa" %(outputFileName,OutDir))
 				os.system("cat %s/ITS2_only.msa >> %s/SEP_ITS1+ITS2.msa" %(OutDir,OutDir))
+
+				#Concat ITS1 & ITS2:
 				outputFileName = OutDir + "/SEP_ITS1+ITS2.msa"
+				prepare_files_for_concat(indexIts12FileName)
+				concat_align_command = "perl /groups/pupko/haim/pupkoSVN/trunk/programs/indelReliability/ConcateAlignments.pl %s %s %s NO NA NA" % \
+									   (indexIts12FileName, outputFileName, OutDir + "/concat-report.txt")
+				os.system(concat_align_command)
+				return 'sep_ready'
+				#outputFileName = OutDir + "/SEP_ITS1+ITS2.msa"
 			else:
 				outputFileName = OutDir + "/ITS2_only.msa";
 		elif(ITS2count == 1):
@@ -394,8 +424,8 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 
 
 		# Align SEP_ITS1_ITS2: added bu michal to ensure its aligned file
-		os.system("cat %s/SEP_ITS1+ITS2.msa >> %s/SEP_ITS1+ITS2_temp.msa" %(OutDir,OutDir))
-		os.system("mafft --auto --quiet %s/SEP_ITS1+ITS2_temp.msa > %s" %(OutDir,outputFileName))
+		#os.system("cat %s/SEP_ITS1+ITS2.msa >> %s/SEP_ITS1+ITS2_temp.msa" %(OutDir,OutDir))
+		#os.system("mafft --auto --quiet %s/SEP_ITS1+ITS2_temp.msa > %s" %(OutDir,outputFileName))
 
 	return outputFileName
 
@@ -450,7 +480,7 @@ def ITS_CLUSTALO_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2F
 			adjustDirScript = ott_config['general']['OTT_MAIN']+'/ott_scripts/adjustDirFasta.py'
 			f_msa_its.write("Calling: python %s -i %s\n" %(adjustDirScript,ITS1Fasta))
 			os.system("python %s -i %s" %(adjustDirScript,ITS1Fasta))
-			os.system("mafft --auto 0 --ep 0.000000 %s > %s/ITS1_only.msa" %(ITS1Fasta,OutDir))
+			os.system("mafft --auto %s > %s/ITS1_only.msa" %(ITS1Fasta,OutDir))
 			# system "mafft --retree 2 --maxiterate 0 --bl 62 --op 1.530000 --ep 0.000000 $ITS1Fasta > OutDir/ITS1_only.msa" ; #-bl 62 , --op 1.530000 -> is default, --ep 0.000000 allows large gaps !!!
 			outputFileName = OutDir + "/ITS1_only.msa"
 		elif(ITS1count == 1):
@@ -461,7 +491,7 @@ def ITS_CLUSTALO_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2F
 			adjustDirScript = ott_config['general']['OTT_MAIN']+'/ott_scripts/adjustDirFasta.py'
 			f_msa_its.write("Calling: python %s -i %s\n" %(adjustDirScript,ITS2Fasta))
 			os.system("python %s -i %s" %(adjustDirScript,ITS2Fasta))
-			os.system("mafft --auto 0 --ep 0.000000 %s > %s/ITS2_only.msa" %(ITS2Fasta,OutDir))
+			os.system("mafft --auto %s > %s/ITS2_only.msa" %(ITS2Fasta,OutDir))
 
 			if outputFileName:
 				os.system("cat %s > %s/SEP_ITS1+ITS2.msa" %(outputFileName,OutDir))
@@ -942,6 +972,10 @@ def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidance
 			f_mainITS_log.write("MSA software -> MAFFT\n")
 			MSAfileName = ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,its1fasta, its2fasta, itscombfasta,scriptsDir)
 
+		if MSAfileName is 'sep_ready':
+			logger.debug("ITS from ITS1 and ITS2, no combined data")
+			shutil.copyfile(OutDir + '/SEP_ITS1+ITS2.msa', OutDir+"/oneSeqPerSpecies.msa")
+			return
 		f_mainITS_log.write("After MSA - selecting a single ITS seq per species. MSA file: %s\n" % MSAfileName)
 		pickOneSeqPerSpeciesMSA(context,MSAfileName, OutDir, OutDir+"/oneSeqPerSpecies.msa", scriptsDir, pickFromMSAlog,append)
 
