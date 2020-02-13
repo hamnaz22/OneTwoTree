@@ -196,7 +196,7 @@ else{
 ### Create concat seq.nex
 
 #system( 'perl', "/groups/itay_mayrose/shiranabad/Maya/ploiDB/SVN/mrbayes/convert_fasta2nexus.pl",	# CHANGE PATH!!!
-system( 'perl', "/groups/itay_mayrose/michaldrori/scripts/convert_fasta2nexus.pl",	# CHANGE PATH!!!
+system( 'perl', "/bioseq/oneTwoTree/ott_scripts/convert_fasta2nexus.pl",	# CHANGE PATH!!!
 	$concatToConvert, $concatSeqOut ) == 0
 	or die "Can't convert $concatToConvert to Nexus !";
 
@@ -436,7 +436,7 @@ sub create_nexus_for_cluster {
 
 	# Convert fasta to nexus using external script
 	#system( 'perl', "/groups/itay_mayrose/shiranabad/Maya/ploiDB/SVN/mrbayes/convert_fasta2nexus.pl",
-	system( 'perl', "/groups/itay_mayrose/michaldrori/scripts/convert_fasta2nexus.pl",	
+	system( 'perl', "/bioseq/oneTwoTree/ott_scripts/convert_fasta2nexus.pl",	
 		$fastaToConvert, $outSeq ) == 0
 	  or die "Can't convert $fastaToConvert to Nexus !";
 

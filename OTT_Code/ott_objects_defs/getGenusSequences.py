@@ -31,15 +31,28 @@ def DB_getGBsequences(context, fasta_filename, gb_filename, nextTaxId):
 	#Create a dictionary for number of seqs per TaxID to enable the sepertion of large TaxIDs:
 	#Check relevant groups and search all tables accordingly:
 	count_grp = 1
+
+	rows=[]
 	for grp_name in grp_list:
 		grp_db_table = 'Genbank_seqs_' +grp_name
-		out_query += "SELECT * from %s where TaxonID In (%s)" % (grp_db_table,list_for_query)
-		if count_grp < len(grp_list):
-			out_query += " UNION "
-			count_grp+=1
-	logger.debug("Perform %s" % (out_query))
-	curs.execute(out_query)
-	rows = curs.fetchall()
+		out_query = "SELECT * from %s where TaxonID In (%s)" % (grp_db_table,list_for_query)
+		logger.debug("Perform query on %s: %s" % (grp_db_table,out_query))
+		curs.execute(out_query)
+		if rows:
+			rows.extend(curs.fetchall())
+		else:
+			rows = curs.fetchall()
+
+	# Original code using UNION:
+	#for grp_name in grp_list:
+	#	grp_db_table = 'Genbank_seqs_' +grp_name
+	#	out_query += "SELECT * from %s where TaxonID In (%s)" % (grp_db_table,list_for_query)
+	#	if count_grp < len(grp_list):
+	#		out_query += " UNION "
+	#		count_grp+=1
+	#logger.debug("Perform %s" % (out_query))
+	#curs.execute(out_query)
+	#rows = curs.fetchall()
 
 	#Make sure some data was collected: else notify the user:
 	if not rows:
@@ -108,7 +121,7 @@ def DB_getGBsequences(context, fasta_filename, gb_filename, nextTaxId):
 
 				no_of_seq_for_taxonid = seq_count_perTaxID[taxon]
 				#Handle Large taxIds: more than 1000 seqs for one taxID
-				if hugeTree_flag and no_of_seq_for_taxonid >= 1000:
+				if hugeTree_flag and no_of_seq_for_taxonid >= 15000:
 					create_dir_if_not_exists(context.largeSpeciesDir)
 					# Create ITS fasta file for Large Species ITS seqs that will be later added to the reg ITS file:
 					ITS_large_fasta = open(context.largeSpeciesITS, 'w')

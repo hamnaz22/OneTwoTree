@@ -255,6 +255,8 @@ def escape_organism_name(organism_name):
 
 	escaped_organism = escaped_organism.replace("×", "x ")
 	escaped_organism = escaped_organism.replace(" ", "_")
+	escaped_organism = escaped_organism.replace("]", "")
+	escaped_organism = escaped_organism.replace("[", "")
 	escaped_organism = escaped_organism.replace(",", "_")
 	escaped_organism = escaped_organism.replace("-", "_")
 	escaped_organism = escaped_organism.replace("'", "_")

@@ -13,7 +13,7 @@ GetOptions(
 	"id=s"     => \$id
 );
 
-my $from = 'evolseq@post.tau.ac.il';
+my $from = 'evolseq@tauex.tau.ac.il';
 
 my $subject = "Your OneTwoTree job $id $jobTitle is being processed.";
 
@@ -57,3 +57,27 @@ my $host = `hostname`;
 print "hostname: $host\n";
 
 
+
+###!/usr/bin/perl
+##use strict;
+##use warnings;
+##
+### first, create your message
+##use Email::MIME;
+##my $message = Email::MIME->create(
+##  header_str => [
+##    From    => 'evolseq@tauex.tau.ac.il',
+##    To      => 'michal.md75@gmail.com',
+##    Subject => 'Happy birthday!',
+##  ],
+##  attributes => {
+##    encoding => 'quoted-printable',
+##    charset  => 'ISO-8859-1',
+##  },
+##  body_str => "Happy birthday to you!\n",
+##);
+##
+### send the message
+##use Email::Sender::Simple qw(sendmail);
+##sendmail($message);
+##

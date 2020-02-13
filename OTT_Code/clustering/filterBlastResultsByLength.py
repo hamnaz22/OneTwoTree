@@ -34,20 +34,20 @@ def initCommandLineLogger():
 def noDuple_Align_length_calc(EndPoint_StartKey_dict):
 
 	calc_length=0;indx=0
-	logger.debug("Calc real Align length according to dict:")
-	logger.debug(EndPoint_StartKey_dict)
+	#logger.debug("Calc real Align length according to dict:")
+	#logger.debug(EndPoint_StartKey_dict)
 	sorted_start_points = list(EndPoint_StartKey_dict.keys())
-	logger.debug(sorted_start_points)
+	#logger.debug(sorted_start_points)
 	indx_max = len(sorted_start_points)
 	if indx_max == 1:
 		start_point = sorted_start_points[0]
 		calc_length+=abs(EndPoint_StartKey_dict[start_point]-start_point)+1
-		logger.debug("return the follwoing align length:")
-		logger.debug(calc_length)
+		#logger.debug("return the follwoing align length:")
+		#logger.debug(calc_length)
 		return calc_length
 	sorted_start_points = sorted(sorted_start_points)
-	logger.debug("sorted_start_points:")
-	logger.debug(sorted_start_points)
+	#logger.debug("sorted_start_points:")
+	#logger.debug(sorted_start_points)
 	#indx_max = len(EndPoint_StartKey_dict) #Number of pairs to check
 	#calc first align length:
 	start_point = sorted_start_points[0]
@@ -60,11 +60,11 @@ def noDuple_Align_length_calc(EndPoint_StartKey_dict):
 			cur_contribution = EndPoint_StartKey_dict[sorted_start_points[indx]] - prev_end_point
 		else:
 			cur_contribution = EndPoint_StartKey_dict[sorted_start_points[indx]] - cur_start_point + 1
-		logger.debug("Adding contribution: %s" %str(cur_contribution))
+		#logger.debug("Adding contribution: %s" %str(cur_contribution))
 		calc_length+=cur_contribution
 		indx+=1
-	logger.debug("return the follwoing align length:")
-	logger.debug(calc_length)
+	#logger.debug("return the follwoing align length:")
+	#logger.debug(calc_length)
 	return calc_length
 
 

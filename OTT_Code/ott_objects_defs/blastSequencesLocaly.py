@@ -16,6 +16,36 @@ __author__ = 'moshe'
 
 blast_results_header = "outgroup_seq_id,taxonomy_last,organism,gi,gb,sacc,saccver,evalue,bitscore,score,pident,ppos,qlen,slen,length"
 
+
+def return_taxaID_list_includingITS(spc_list,ploidb_context):
+
+	first_name = list(spc_list)[0]
+	logger.debug("first_name is %s" % first_name)
+	# Verify all taxa in context.species_names_by_tax_id dictionary: ITS mainly !!!
+	# -------------------------------------------------------------------------------
+	if not first_name.isdigit():
+		logger.debug("first_name.isdigit is %s" % first_name.isdigit)
+		cluster_species_list_temp = list(spc_list)
+		cluster_species_list = []
+		for taxa_name in cluster_species_list_temp:
+			logger.debug("taxa_name is %s" % taxa_name)
+			# if not taxa_name.isdigit():
+
+			for taxId, name in ploidb_context.species_names_by_tax_id.items():  # for name, age in dictionary.iteritems():  (for Python 2.x)
+				if name == taxa_name:
+					taxa_id = taxId
+
+			# taxa_id = list(ploidb_context.species_names_by_tax_id.keys())[list(ploidb_context.species_names_by_tax_id.values()).index(taxa_name)]
+			logger.debug("taxa_id is %s" % taxa_id)
+			cluster_species_list.append(taxa_id)
+			ploidb_context.species_names_by_tax_id[taxa_id] = taxa_name
+			logger.debug("ITS cluster taxa: %s - %s" % (taxa_id, taxa_name))
+		return cluster_species_list
+	else:
+		return spc_list
+
+
+
 #This function will run the check for selecting clusters to be included in the final concatenated alignment:
 def select_clusters_for_final_concat(ploidb_context,outgroup_selection):
 	# ------------------------------------ Additional Code for Cluster Selection (michal) ---------------------------------------#
@@ -36,7 +66,7 @@ def select_clusters_for_final_concat(ploidb_context,outgroup_selection):
 	# First it will add clusters that add the most data (according to wheight as defined below)
 	# Then it will continue to add clusters with wheight 0 according to the NumOf taxa in them (max first)
 	# it will stop when the sum of median length of clusters is less then 20000
-	while all_cluster_length < max_concat_seq_length:  # or i < num_of_clusters:
+	while all_cluster_length < max_concat_seq_length and i <= num_of_clusters:
 		added_species_dict = {}
 		weight_dict = {}
 		length_dict = {}
@@ -50,7 +80,9 @@ def select_clusters_for_final_concat(ploidb_context,outgroup_selection):
 				logger.debug(cluster_context.index)
 				# NEED to add filter for cluster selection in case of no outgroup:
 				# def get_cluster_contribution(outgroup_context, ploidb_context, context_to_check):
-				cluster_species_list = current_context.get_list_of_species()
+				cluster_idx = cluster_context.index
+				#cluster_species_list = current_context.get_list_of_species()
+				cluster_species_list = return_taxaID_list_includingITS(current_context.get_list_of_species(),ploidb_context)
 				logger.debug("Checking if to add the following cluster %s, length = %s, species count = %s" % (
 				ploidb_context.get_cluster_by_id(cluster_context.cluster_id), str(cluster_len),
 				str(len(cluster_species_list))))
@@ -58,14 +90,51 @@ def select_clusters_for_final_concat(ploidb_context,outgroup_selection):
 				logger.debug("Species List: %s" % cluster_species_list)
 				added_species = list(set(cluster_species_list) - set(ref_species_list))
 				logger.debug("diff_species List: %s" % added_species)
-				weight_dict[cluster_context.index] = len(cluster_species_list) * len(
-					added_species)  # Weight is the number of species in cluster TIMES the number os New species it adds to the concat
+				#calculate ratio's for weight:
+				cluster_L_ratio = get_cluster_L_ratio(ploidb_context, [cluster_context.cluster_id])
+
+				weight_flag = ploidb_context.UserFlags_dict['cluster_selection']
+				#weight_flag = 'Maximize_taxa_coverage'
+				#weight_flag = 'Maximize_taxa_coverage'  OR  'Maximize_info' (many clusters !!)
+				if len(ref_species_list) != 0 and len(cluster_species_list) / len(
+						ref_species_list) <= 0.05:  # cluster with less than 5% of total taxa number
+					logger.debug("Cluster %d has less than 5%% taxa so it will not be added" % cluster_idx)
+					continue
+				if weight_flag == 'Maximize_info':
+					if len(ref_species_list) != 0:	# first cluster selection
+						Taxa_A_ratio = len(cluster_species_list) / len(ref_species_list)
+					else:
+						Taxa_A_ratio = len(cluster_species_list) / 1
+				else: # weight_flag == 'Maximize_taxa_coverage'
+					if len(ref_species_list) != 0:	# first cluster selection
+						#Taxa_A_ratio = len(added_species) / len(cluster_species_list)
+						if len(added_species) == 0:
+							Taxa_A_ratio = (len(cluster_species_list) / len(ref_species_list))
+						else: #if there are new taxa then it will enlarge the score of this cluster:
+							Taxa_A_ratio = len(added_species) * (len(cluster_species_list) / len(ref_species_list))
+					else:
+						Taxa_A_ratio = len(cluster_species_list) / 1 #length of 1st cluster
+				logger.debug("Cluster: %d, L_ratio %f, Taxa_A_ratio %f" % (cluster_idx, cluster_L_ratio, Taxa_A_ratio))
+				weight_val = cluster_L_ratio * Taxa_A_ratio
+
+				weight_dict[cluster_context.index] = weight_val
+				#weight_dict[cluster_context.index] = len(cluster_species_list) * len(
+				#	added_species)  # Weight is the number of species in cluster TIMES the number os New species it adds to the concat
+
+
+				#if len(cluster_species_list) < 5:
+				#	weight_dict[cluster_context.index] = 0
+				#	logger.debug("Cluster %s has less than 5 taxa. Not included in msa." % ploidb_context.get_cluster_by_id(cluster_context.cluster_id))
+				#	continue
 				logger.debug("Weight %s" % str(weight_dict[cluster_context.index]))
 				length_dict[cluster_context.index] = cluster_len
 				added_species_dict[cluster_context.index] = added_species
 				logger.debug(weight_dict)
 				logger.debug(length_dict)
 		i += 1
+		#Check if weight dictionary is empty:
+		if not weight_dict:
+			break
 		max_cluster_index = max(weight_dict, key=weight_dict.get)
 		all_cluster_length += length_dict[max_cluster_index]
 		Chosen_cluster_list.append(max_cluster_index)
@@ -866,26 +935,27 @@ def check_and_add_cluster_to_concat(cid_to_check, ploidb_context, outgroup_conte
 	outgroup_context.add_cluster(cid_to_check)
 	return True
 
-def pick_next_cluster_for_common_NOoutgroup_greedy(ploidb_context, outgroup_context):
-	logger.debug("Picking next cluster for %s" % outgroup_context.outgroup_name)
-	cids_with_outgroup_seq = outgroup_context.candidate_cids_with_outgroup_seq
-	cids_without_outgroup_seq = outgroup_context.candidate_cids_without_outgroup_seq
-	logger.debug("cids_with_outgroup_seq=%s" % ",".join(cids_with_outgroup_seq))
-	logger.debug("cids_without_outgroup_seq=%s" % ",".join(cids_without_outgroup_seq))
-
-	cluster_wo_outgroup = None
-	if len(cids_without_outgroup_seq) > 0 and not outgroup_context.next_selection_must_have_outgroup:
-		next_cid = cids_without_outgroup_seq[0]
-		cluster_wo_outgroup = ploidb_context.get_cluster_by_id(next_cid)
-	logger.debug("next cluster without outgroup is %s " % (cluster_wo_outgroup))
-	clusters_to_check = list()
-	if cluster_wo_outgroup is not None: clusters_to_check.append(cluster_wo_outgroup)
-	ordered_clusters = sorted(clusters_to_check, key=lambda cluster: cluster.get_data_matrix_size(estimated=True),
-							  reverse=True)
-	cluster_was_added = False
-	for c in ordered_clusters:
-		if cluster_was_added: break
-		cluster_was_added = check_and_add_cluster_to_concat(c.cluster_id, ploidb_context, outgroup_context)
+# !!! NOT USED !!!
+# def pick_next_cluster_for_common_NOoutgroup_greedy(ploidb_context, outgroup_context):
+#	logger.debug("Picking next cluster for %s" % outgroup_context.outgroup_name)
+#	cids_with_outgroup_seq = outgroup_context.candidate_cids_with_outgroup_seq
+#	cids_without_outgroup_seq = outgroup_context.candidate_cids_without_outgroup_seq
+#	logger.debug("cids_with_outgroup_seq=%s" % ",".join(cids_with_outgroup_seq))
+#	logger.debug("cids_without_outgroup_seq=%s" % ",".join(cids_without_outgroup_seq))
+#
+#	cluster_wo_outgroup = None
+#	if len(cids_without_outgroup_seq) > 0 and not outgroup_context.next_selection_must_have_outgroup:
+#		next_cid = cids_without_outgroup_seq[0]
+#		cluster_wo_outgroup = ploidb_context.get_cluster_by_id(next_cid)
+#	logger.debug("next cluster without outgroup is %s " % (cluster_wo_outgroup))
+#	clusters_to_check = list()
+#	if cluster_wo_outgroup is not None: clusters_to_check.append(cluster_wo_outgroup)
+#	ordered_clusters = sorted(clusters_to_check, key=lambda cluster: cluster.get_data_matrix_size(estimated=True),
+#							  reverse=True)
+#	cluster_was_added = False
+#	for c in ordered_clusters:
+#		if cluster_was_added: break
+#		cluster_was_added = check_and_add_cluster_to_concat(c.cluster_id, ploidb_context, outgroup_context)
 
 
 def pick_next_cluster_for_common_outgroup_greedy(ploidb_context, outgroup_context):
@@ -935,37 +1005,39 @@ def get_best_clusters_coverage_for_outgroup(conn, ploidb_context, outgroup_name,
 	return outgroup_context
 
 
-def get_best_clusters_coverage_for_outgroup_Mdebug(conn, ploidb_context, outgroup_name, outgroup_type, num_of_clusters,
-											data_matrix_size):
-	logger.debug(
-		"Processing the outgroup %s type=%s data_matrix_size=%d" % (outgroup_name, outgroup_type, data_matrix_size))
+# !!! NOT USED !!!
+# def get_best_clusters_coverage_for_outgroup_Mdebug(conn, ploidb_context, outgroup_name, outgroup_type, num_of_clusters,
+#											data_matrix_size):
+#	logger.debug(
+#		"Processing the outgroup %s type=%s data_matrix_size=%d" % (outgroup_name, outgroup_type, data_matrix_size))
+#
+#	clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq = get_clusters_lists_per_outgroup(conn,
+#																										ploidb_context,
+#																										outgroup_name)
+#	outgroup_context = OutGroupSelectionContext(ploidb_context, outgroup_name, outgroup_type,
+#												clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq)
+#	while outgroup_context.are_candidates_left():
+#		pick_next_cluster_for_common_outgroup_greedy(ploidb_context, outgroup_context)
+#		logger.debug("After next cluster pick %s" % outgroup_context)
+#	return outgroup_context
 
-	clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq = get_clusters_lists_per_outgroup(conn,
-																										ploidb_context,
-																										outgroup_name)
-	outgroup_context = OutGroupSelectionContext(ploidb_context, outgroup_name, outgroup_type,
-												clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq)
-	while outgroup_context.are_candidates_left():
-		pick_next_cluster_for_common_outgroup_greedy(ploidb_context, outgroup_context)
-		logger.debug("After next cluster pick %s" % outgroup_context)
-	return outgroup_context
 
-
-def get_best_clusters_coverage_for_NOoutgroup(conn, ploidb_context, outgroup_name, outgroup_type, num_of_clusters,data_matrix_size):
-	#logger.debug("Processing the outgroup %s type=%s data_matrix_size=%d" % (outgroup_name, outgroup_type, data_matrix_size))
-
-	clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq = get_clusters_lists_per_outgroup(conn,ploidb_context,outgroup_name)
-
-	outgroup_context = OutGroupSelectionContext(ploidb_context, outgroup_name, outgroup_type,clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq)
-	logger.debug("clusters_ids_with_outgroup_seq")
-	logger.debug(clusters_ids_with_outgroup_seq)
-	logger.debug("clusters_ids_without_outgroup_seq")
-	logger.debug(clusters_ids_without_outgroup_seq)
-
-	while outgroup_context.are_candidates_left():
-		pick_next_cluster_for_common_NOoutgroup_greedy(ploidb_context, outgroup_context)
-		logger.debug("After next cluster pick %s" % outgroup_context)
-	return outgroup_context
+# !!!   NOT USED !!!!!!!
+# def get_best_clusters_coverage_for_NOoutgroup(conn, ploidb_context, outgroup_name, outgroup_type, num_of_clusters,data_matrix_size):
+#	#logger.debug("Processing the outgroup %s type=%s data_matrix_size=%d" % (outgroup_name, outgroup_type, data_matrix_size))
+#
+#	clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq = get_clusters_lists_per_outgroup(conn,ploidb_context,outgroup_name)
+#
+#	outgroup_context = OutGroupSelectionContext(ploidb_context, outgroup_name, outgroup_type,clusters_ids_with_outgroup_seq, clusters_ids_without_outgroup_seq)
+#	logger.debug("clusters_ids_with_outgroup_seq")
+#	logger.debug(clusters_ids_with_outgroup_seq)
+#	logger.debug("clusters_ids_without_outgroup_seq")
+#	logger.debug(clusters_ids_without_outgroup_seq)
+#
+#	while outgroup_context.are_candidates_left():
+#		pick_next_cluster_for_common_NOoutgroup_greedy(ploidb_context, outgroup_context)
+#		logger.debug("After next cluster pick %s" % outgroup_context)
+#	return outgroup_context
 
 
 def Check_outgroup_forLegalName(outgroup_name):
@@ -986,13 +1058,18 @@ def get_selected_outgroup(context_local):
 				if "(organism)" in line:
 					outgroup_str = line[line.find("[")+1:line.find("]")]
 					temp_out_name = outgroup_str.replace(" (organism)","")
-					outgroup_name = temp_out_name.replace(" ","_").replace(':','_').replace("-","_").replace(",","").replace("'","").replace("(","_").replace(")","_") #in case of BOLD
+					outgroup_name = temp_out_name.replace(" ","_").replace(':','_').replace("-","_").replace(",","")\
+					.replace("'","").replace("(","_").replace(")","_").replace("[","").replace("]","") #in case of BOLD
 					return outgroup_name
 				elif "(genus)" in line:
-					#print("Looking for outgroup...\n")
-					outgroup_name = line[line.find("[")+1:line.find("]")]
-					temp_out_1 = outgroup_name.split(" ")
-					outgroup_name =temp_out_1[0]
+					#outgroup_name = line[line.find("[")+1:line.find("]")]
+					#temp_out_1 = outgroup_name.split(" ")
+					#outgroup_name =temp_out_1[0]
+					#return outgroup_name
+					outgroup_str = line[line.find("[") + 1:line.find("]")]
+					temp_out_name = outgroup_str.replace(" (genus)", "")
+					outgroup_name = temp_out_name.replace(" ","_").replace(':','_').replace("-","_").replace(",","")\
+					.replace("'", "").replace("(", "_").replace(")", "_").replace("[","").replace("]","")  # in case of BOLD
 					return outgroup_name
 				elif "None" in line:
 					return 'NULL'
@@ -1001,28 +1078,36 @@ def get_selected_outgroup(context_local):
 
 def rerun_get_selected_outgroup(origin_outgroup_file):
 
-	with open(origin_outgroup_file) as f_outgroup:
-		for line in f_outgroup:
-			if "(organism)" in line:
-				outgroup_name = line[line.find("[")+1:line.find("]")]
-				temp_out_1 = outgroup_name.split(" ")
-				temp_out_2 = temp_out_1[0] + "_" + temp_out_1[1]
-				temp_out_2 = temp_out_2.replace(':','_')    #in case of BOLD:3434 in name
-				outgroup_name = temp_out_2
-				return outgroup_name
-			elif "(genus)" in line:
-				#print("Looking for outgroup...\n")
-				outgroup_name = line[line.find("[")+1:line.find("]")]
-				temp_out_1 = outgroup_name.split(" ")
-				outgroup_name =temp_out_1[0]
-				return outgroup_name
-			elif "None" in line:
-				return 'NULL'
-			else:
-				#outgroup_name = line.replace(' ','_').rstrip()
-				outgroup_name = return_codedName(line)
-				return outgroup_name
-	return 'FailedToRead_Outgroup'
+	#Check if exists:
+	if os.path.exists(origin_outgroup_file):
+		with open(origin_outgroup_file) as f_outgroup:
+			for line in f_outgroup:
+				if "(organism)" in line:
+					outgroup_name = line[line.find("[")+1:line.find("]")]
+					temp_out_1 = outgroup_name.split(" ")
+					temp_out_2 = temp_out_1[0] + "_" + temp_out_1[1]
+					temp_out_2 = temp_out_2.replace(':','_')    #in case of BOLD:3434 in name
+					outgroup_name = temp_out_2
+					return outgroup_name
+				elif "(genus)" in line:
+					#outgroup_name = line[line.find("[")+1:line.find("]")]
+					#temp_out_1 = outgroup_name.split(" ")
+					#outgroup_name =temp_out_1[0]
+					#return outgroup_name
+					outgroup_str = line[line.find("[") + 1:line.find("]")]
+					temp_out_name = outgroup_str.replace(" (genus)", "")
+					outgroup_name = temp_out_name.replace(" ","_").replace(':','_').replace("-","_").replace(",","")\
+					.replace("'", "").replace("(", "_").replace(")", "_").replace("[","").replace("]","")  # in case of BOLD
+					return outgroup_name
+				elif "None" in line:
+					return 'NULL'
+				else:
+					#outgroup_name = line.replace(' ','_').rstrip()
+					outgroup_name = return_codedName(line)
+					return outgroup_name
+		return 'FailedToRead_Outgroup'
+	else:
+		return 'NoOutgroupFile'
 
 def init_common_outgroup_MDebug(ploidb_context):
 	# Open file with Outgroup outcome - either None or selected outgroup name:
@@ -1084,6 +1169,7 @@ def init_common_outgroup_MDebug(ploidb_context):
 			logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 			f_outgroup.write('None')
 			f_outgroup.close()
+			Write_Clusters_data_File(ploidb_context)
 			return False
 
 		selected_outgroup_context, top_outgroup_contexts = get_best_outgroup_context(outgroup_context_list)
@@ -1166,6 +1252,7 @@ def init_common_outgroup(ploidb_context):
 			logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 			f_outgroup.write('None')
 			f_outgroup.close()
+			Write_Clusters_data_File(ploidb_context)
 			return False
 
 		selected_outgroup_context, top_outgroup_contexts = get_best_outgroup_context(outgroup_context_list)
@@ -1190,140 +1277,6 @@ def init_common_outgroup(ploidb_context):
 
 #changed the query of outgroup to bring only names that don't contain genus names of alignment:
 
-
-def init_NO_common_outgroup(ploidb_context,outgroup_selection):
-
-	logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-	logger.info("^^^^^^^^^ outgroup_selection is %s ^^^^^^^^^^^^^^^" % outgroup_selection)
-	logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-
-	# This way we ensure that the clusters table exists
-	write_stats_to_db(ploidb_context)
-	ploidb_context.UserOutgroupInc = 'NO'
-
-	with get_db_conn(ploidb_context.db_file) as conn:
-		curs = conn.cursor()
-
-		# Iterating all possible outgroups - the WHERE condition is only optimization to make sure very small outgroups are not checked
-		query = "select outgroup_name,outgroup_type,num_of_clusters,data_matrix_size " \
-				"from outgroup_stats " \
-				"where data_matrix_size >= 0.25 * (select max(data_matrix_size) from outgroup_stats) limit 50"
-
-		curs.execute(query)
-		outgroup_rows = curs.fetchall()
-		logger.info("Found %d candidates for outgroup" % len(outgroup_rows))
-		#get all genera in current Alignment species list:
-		genera_list=[]
-		for specie in ploidb_context.species_list_names:
-			specie_split=specie.split(' ')
-			genera_list.append(specie_split[0])
-			logger.debug("Init Common Outgroup, genera to exclude: %s\n" % specie_split[0])
-		outgroup_context_list = list()
-		get_next_outgroup=0
-
-		#------------------------------------ Additional Code for Cluster Selection (michal) ---------------------------------------#
-		#New Addition of user putgroup -> need to check if included in one of the selected clusters, otherwise notify the user:
-
-		total_calc_length = 0
-		total_species_num = len(ploidb_context.species_list_names)
-		total_species_coverage_list = []
-		max_concat_seq_length = int(ott_config['common outgroup']['max_concat_seq_length'])
-		logger.debug("Maximum concat length is %s" % str(max_concat_seq_length))
-
-		# Initialize list and params for concat clusters:
-		Chosen_cluster_ids_list=[]
-		max_cluster_index_Id_dict={}
-		all_cluster_length = 0
-		Chosen_cluster_list=[]
-		ref_species_list=[]
-		num_of_clusters = len(ploidb_context.cluster_contexts)
-		i=0
-		#This section will determine which clusters will be added to the final concat:
-		#First it will add clusters that add the most data (according to wheight as defined below)
-		#Then it will continue to add clusters with wheight 0 according to the NumOf taxa in them (max first)
-		#it will stop when the sum of median length of clusters is less then 20000
-		while all_cluster_length < max_concat_seq_length:# or i < num_of_clusters:
-			added_species_dict={}
-			weight_dict={}
-			length_dict={}
-			for cluster_context in ploidb_context.cluster_contexts:
-				max_cluster_index_Id_dict[cluster_context.index]=cluster_context.cluster_id
-				if cluster_context.index in Chosen_cluster_list:
-					continue
-				else:
-					cluster_len = get_cluster_ids_total_seq_len(ploidb_context, [cluster_context.cluster_id])
-					current_context = ploidb_context.get_cluster_by_id(cluster_context.cluster_id)
-					logger.debug(cluster_context.index)
-					#NEED to add filter for cluster selection in case of no outgroup:
-					#def get_cluster_contribution(outgroup_context, ploidb_context, context_to_check):
-					cluster_species_list = current_context.get_list_of_species()
-					logger.debug("Checking if to add the following cluster %s, length = %s, species count = %s" % (ploidb_context.get_cluster_by_id(cluster_context.cluster_id),str(cluster_len),str(len(cluster_species_list))))
-					logger.debug("Chosen Cluster List: %s" %Chosen_cluster_list)
-					logger.debug("Species List: %s" %cluster_species_list)
-					added_species = list(set(cluster_species_list) - set(ref_species_list))
-					logger.debug("diff_species List: %s" %added_species)
-					weight_dict[cluster_context.index]=len(cluster_species_list)*len(added_species)  #Weight is the number of species in cluster TIMES the number os New species it adds to the concat
-					logger.debug("Weight %s" %str(weight_dict[cluster_context.index]))
-					length_dict[cluster_context.index]=cluster_len
-					added_species_dict[cluster_context.index] = added_species
-					logger.debug(weight_dict)
-					logger.debug(length_dict)
-			i+=1
-			max_cluster_index = max(weight_dict, key=weight_dict.get)
-			all_cluster_length+=length_dict[max_cluster_index]
-			Chosen_cluster_list.append(max_cluster_index)
-			Chosen_cluster_ids_list.append(max_cluster_index_Id_dict[max_cluster_index])
-			ref_species_list.extend(added_species_dict[max_cluster_index])
-			logger.debug("Updated clusters list: %s" % Chosen_cluster_list)
-			logger.debug("Added species list: %s" % added_species_dict[max_cluster_index])
-			logger.debug("Adding Cluster %s, Total length: %s" %(str(max_cluster_index),str(all_cluster_length)))
-			#Check user outgroup:
-			if 'Outgroup_User' in ploidb_context.UserFlags_dict:
-				for taxID_str in added_species_dict[max_cluster_index]:
-					if taxID_str == ploidb_context.UserOutgroupTaxId:
-						logger.debug("Found User Outgroup in added cluster !!!")
-						ploidb_context.UserOutgroupInc = 'YES'
-				#if str(ploidb_context.UserOutgroupTaxId) in added_species_dict[max_cluster_index]:
-				#	logger.debug("Found User Outgroup in added cluster !!!")
-				#	ploidb_context.UserOutgroupInc = 'YES'
-			if len(Chosen_cluster_list) ==  num_of_clusters:
-				break
-
-
-		#Update summary file in case User outgroup is not included in the output:
-		if 'Outgroup_User' in ploidb_context.UserFlags_dict and ploidb_context.UserOutgroupInc == 'NO':
-			with open(ploidb_context.summary_file,'w') as sum_f:
-				sum_f.write("User Outgroup (%s) is Not included in the final Alignment\n" %ploidb_context.UserFlags_dict['Outgroup_User'])
-			ploidb_context.UserOutgroupInMSA = False
-			#statusFail_LogFile(ploidb_context, 'The User Outgroup you specified was not included in the final MSA and so OneTwoTree did not reconstruct a phylogeny.')
-			#raise Exception(
-			#	"Failed - The User Outgroup you specified was not included in the final MSA and so OneTwoTree did not reconstruct a phylogeny.")
-		elif 'Outgroup_User' in ploidb_context.UserFlags_dict:
-			#Write user outgroup name to file
-			with open(ploidb_context.outgroup_file, 'w') as out_f:
-				out_f.write(ploidb_context.UserFlags_dict['Outgroup_User'])
-			ploidb_context.outgroupSelection = get_selected_outgroup(ploidb_context)
-			with open(ploidb_context.summary_file,'a') as f_sum:
-				f_sum.write("User Selected Outgroup: %s\n" % ploidb_context.outgroupSelection)
-		elif outgroup_selection == 'None':
-			with open(ploidb_context.outgroup_file, 'w') as out_f:
-				out_f.write('None')
-		#Copy chosen clusters to final list:
-		logger.debug("Chosen Cluster index: %s" % Chosen_cluster_list)
-		logger.debug("Chosen Cluster Ids: %s " % Chosen_cluster_ids_list)
-		ploidb_context.cluster_contexts_for_concat_tree = ploidb_context.get_clusters_by_ids(Chosen_cluster_ids_list)
-		logger.debug(ploidb_context.cluster_contexts_for_concat_tree)
-
-		#for cluster_context in ploidb_context.cluster_contexts:
-		for cluster_context in ploidb_context.cluster_contexts_for_concat_tree:
-			if cluster_context.index in Chosen_cluster_list:
-				logger.debug("Adding Cluster %s to concat list" %str(cluster_context.index ))
-				cluster_context.is_used_for_concat_tree = True
-
-
-		#Update SummaryDir with all clusters data:
-		Write_Clusters_data_File(ploidb_context)
-		logger.info("Saving clusters data in %s" % ploidb_context.summary_clusters_data_file)
 
 def init_NO_common_outgroup_MDebug(ploidb_context,outgroup_selection):
 
@@ -1365,20 +1318,49 @@ def create_taxId_acc_list(cluster_fasta_seqs):
 	taxId_Acc_list=[]
 	with open(cluster_fasta_seqs,'r') as f_sequence:
 		for line in f_sequence:
-			if '>gi' in line:
+			#Bug fix - missing its taxon (only taxons that are combinatin of its1&its2, still have to check why they
+			#have another accession id at the beginning of the header -> replace the ">gi" with ">"
+			if '>' in line and '|' in line:
 				taxid_data_list = line.split('|')
 				taxId = taxid_data_list[3]
 				specie_name = taxid_data_list[5]
-				logger.debug("****************** create_taxId_acc_list - name issue *************************")
-				logger.debug(specie_name)
-				name = specie_name.replace(",","").replace("'","").replace("-"," ").replace("("," ").replace(")"," ")   #Raxml doesn't like ( in the name :)
+				#logger.debug("****************** create_taxId_acc_list - name issue *************************")
+				#logger.debug(specie_name)
+				name = specie_name.replace(",","").replace("'","").replace("-"," ").replace("("," ").replace(")"," ")\
+					.replace("[", "").replace("]", "")   #Raxml doesn't like ( in the name :)
 				logger.debug(name)
 				#AccessionId = taxid_data_list[7]
 				AccessionId = taxid_data_list[1]
 				taxId_Acc_list.append(name + '|' + taxId + '|' + AccessionId)
+
 	return taxId_Acc_list
 
+def create_ITS_taxId_acc_list(its_fasta_file, cluster_species_list):
 
+	taxId_Acc_list=[]
+	taxa_accessions_dict=dict()
+	with open(its_fasta_file,'r') as f_sequence:
+		for line in f_sequence:
+			#Bug fix - missing its taxon (only taxons that are combinatin of its1&its2, still have to check why they
+			#have another accession id at the beginning of the header -> replace the ">gi" with ">"
+			if '>' in line and '|' in line:
+				taxid_data_list = line.split('|')
+				taxId = taxid_data_list[3]
+				specie_name = taxid_data_list[5]
+				name = specie_name.replace(",","").replace("'","").replace("-"," ").replace("("," ").replace(")"," ") \
+					.replace("[", "").replace("]", "")   #Raxml doesn't like ( in the name :)
+				logger.debug(name)
+				AccessionId = taxid_data_list[1]
+				if taxId in cluster_species_list:
+					if taxId not in taxa_accessions_dict.keys():
+						taxa_accessions_dict[taxId] = name + '|' + taxId + '|' + AccessionId
+					else:
+						taxa_accessions_dict[taxId] = taxa_accessions_dict[taxId] + '|' + AccessionId
+
+	for taxId in taxa_accessions_dict.keys():
+		taxId_Acc_list.append(taxa_accessions_dict[taxId])
+
+	return taxId_Acc_list
 
 def Write_Accession_Loci_Matrix(ploidb_context):
 
@@ -1441,17 +1423,22 @@ def Write_Clusters_data_File(ploidb_context):
 	cluster_json_dict={}
 	for cluster_context in ploidb_context.cluster_contexts:
 		current_context = ploidb_context.get_cluster_by_id(cluster_context.cluster_id)
-		cluster_species_list = current_context.get_list_of_species()
+		cluster_species_list = return_taxaID_list_includingITS(current_context.get_list_of_species(),ploidb_context)
+		logger.debug(cluster_species_list)
 		ClusterID = str(cluster_context.index)
 		#Check if cluster was chosen for the concat file:
-		logger.debug("ploidb_context.species_names_by_tax_id------------------------ REMOVE")
+		logger.debug("ploidb_context.species_names_by_tax_id")
 		logger.debug(ploidb_context.species_names_by_tax_id)
 		if cluster_context in ploidb_context.cluster_contexts_for_concat_tree:
+			#for key in ploidb_context.species_names_by_tax_id.keys():
+			#	logger.debug("Key of species_names_by_tax_id is %s" %str(key))
 			IncludedInConcat = 'yes'
 			#count species in concat:
 			list_species_concat.extend(cluster_species_list)
 			for taxID in cluster_species_list:
+				#if taxID not in ploidb_context.final_species_names_by_tax_id.keys() and str(taxID) != 'None':
 				if taxID not in ploidb_context.final_species_names_by_tax_id.keys():
+					logger.debug("taxID %s is not in final spcies names, might be the outgtoup, check for bug" %str(taxID))
 					ploidb_context.final_species_names_by_tax_id[taxID] = ploidb_context.species_names_by_tax_id[taxID]
 		else:
 			IncludedInConcat = 'no'
@@ -1461,7 +1448,12 @@ def Write_Clusters_data_File(ploidb_context):
 		else:
 			desc_str = cluster_context.cluster_desc
 		#create taxid-accession dictionary:
-		taxid_accession_list = create_taxId_acc_list(cluster_context.all_seqs_fasta_filename_no_multiple_accessions)
+		if os.path.exists(cluster_context.cluter_work_dir + '/ITS_CLUSTER'):
+			its_fasta_file = os.path.join(ploidb_context.cluter_its_dir, ploidb_context.id + "-allseq-its-only_.fasta")
+			taxid_accession_list = create_ITS_taxId_acc_list(its_fasta_file, cluster_species_list)
+		else:
+			taxid_accession_list = create_taxId_acc_list(cluster_context.all_seqs_fasta_filename_no_multiple_accessions)
+
 		#desc_str=desc_str.split(' ', 2)[2]
 		cluster_len = str(get_cluster_ids_total_seq_len(ploidb_context, [cluster_context.cluster_id]))
 		cluster_data_set = [ClusterID , desc_str , cluster_len , len(cluster_species_list) , cluster_species_list , IncludedInConcat]
@@ -1555,3 +1547,191 @@ def write_outgroup_for_concat_to_file(ploidb_context, outgroup_context):
 
 def is_non_zero_file(fpath):
 	return True if os.path.isfile(fpath) and os.path.getsize(fpath) > 0 else False
+
+
+
+
+#------------------------------------- NOT in USE --------------------------------------------
+def init_NO_common_outgroup(ploidb_context,outgroup_selection):
+
+	logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+	logger.info("^^^^^^^^^ outgroup_selection is %s ^^^^^^^^^^^^^^^" % outgroup_selection)
+	logger.info("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+
+	# This way we ensure that the clusters table exists
+	write_stats_to_db(ploidb_context)
+	ploidb_context.UserOutgroupInc = 'NO'
+
+	with get_db_conn(ploidb_context.db_file) as conn:
+		curs = conn.cursor()
+
+		# Iterating all possible outgroups - the WHERE condition is only optimization to make sure very small outgroups are not checked
+		query = "select outgroup_name,outgroup_type,num_of_clusters,data_matrix_size " \
+				"from outgroup_stats " \
+				"where data_matrix_size >= 0.25 * (select max(data_matrix_size) from outgroup_stats) limit 50"
+
+		curs.execute(query)
+		outgroup_rows = curs.fetchall()
+		logger.info("Found %d candidates for outgroup" % len(outgroup_rows))
+		#get all genera in current Alignment species list:
+		genera_list=[]
+		for specie in ploidb_context.species_list_names:
+			specie_split=specie.split(' ')
+			genera_list.append(specie_split[0])
+			logger.debug("Init Common Outgroup, genera to exclude: %s\n" % specie_split[0])
+		outgroup_context_list = list()
+		get_next_outgroup=0
+
+		#------------------------------------ Additional Code for Cluster Selection (michal) ---------------------------------------#
+		#New Addition of user putgroup -> need to check if included in one of the selected clusters, otherwise notify the user:
+
+		total_calc_length = 0
+		total_species_num = len(ploidb_context.species_list_names)
+		total_species_coverage_list = []
+		max_concat_seq_length = int(ott_config['common outgroup']['max_concat_seq_length'])
+		logger.debug("Maximum concat length is %s" % str(max_concat_seq_length))
+
+		# Initialize list and params for concat clusters:
+		Chosen_cluster_ids_list=[]
+		max_cluster_index_Id_dict={}
+		all_cluster_length = 0
+		Chosen_cluster_list=[]
+		ref_species_list=[]
+		num_of_clusters = len(ploidb_context.cluster_contexts)
+		i=0
+		#This section will determine which clusters will be added to the final concat:
+		#First it will add clusters that add the most data (according to wheight as defined below)
+		#Then it will continue to add clusters with wheight 0 according to the NumOf taxa in them (max first)
+		#it will stop when the sum of median length of clusters is less then 20000
+		while all_cluster_length < max_concat_seq_length:# or i < num_of_clusters:
+			added_species_dict={}
+			weight_dict={}
+			length_dict={}
+			for cluster_context in ploidb_context.cluster_contexts:
+				max_cluster_index_Id_dict[cluster_context.index]=cluster_context.cluster_id
+				if cluster_context.index in Chosen_cluster_list:
+					continue
+				else:
+					#cluster_idx = cluster_context.index
+					#cluster_len = get_cluster_ids_total_seq_len(ploidb_context, [cluster_context.cluster_id])
+					#cluster_L_ratio = get_cluster_L_ratio(ploidb_context, [cluster_context.cluster_id])
+					#logger.debug("Cluster: %d, L_ratio %f" %(cluster_idx,cluster_L_ratio))
+					#current_context = ploidb_context.get_cluster_by_id(cluster_context.cluster_id)
+					##NEED to add filter for cluster selection in case of no outgroup:
+					##def get_cluster_contribution(outgroup_context, ploidb_context, context_to_check):
+					#cluster_species_list = current_context.get_list_of_species()
+					#logger.debug("Checking if to add the following cluster %s, length = %s, species count = %s" % (ploidb_context.get_cluster_by_id(cluster_context.cluster_id),str(cluster_len),str(len(cluster_species_list))))
+					#logger.debug("Chosen Cluster List: %s" %Chosen_cluster_list)
+					#logger.debug("Species List: %s" %cluster_species_list)
+					#added_species = list(set(cluster_species_list) - set(ref_species_list))
+					#logger.debug("diff_species List: %s" %added_species)
+					#weight_dict[cluster_context.index]=len(cluster_species_list)*len(added_species)  #Weight is the number of species in cluster TIMES the number os New species it adds to the concat
+					#logger.debug("Weight %s" %str(weight_dict[cluster_context.index]))
+					#length_dict[cluster_context.index]=cluster_len
+					#added_species_dict[cluster_context.index] = added_species
+					#logger.debug(weight_dict)
+					#logger.debug(length_dict)
+
+					cluster_len = get_cluster_ids_total_seq_len(ploidb_context, [cluster_context.cluster_id])
+					current_context = ploidb_context.get_cluster_by_id(cluster_context.cluster_id)
+					logger.debug(cluster_context.index)
+					# NEED to add filter for cluster selection in case of no outgroup:
+					# def get_cluster_contribution(outgroup_context, ploidb_context, context_to_check):
+					cluster_idx = cluster_context.index
+					cluster_species_list = current_context.get_list_of_species()
+					logger.debug("Checking if to add the following cluster %s, length = %s, species count = %s" % (
+						ploidb_context.get_cluster_by_id(cluster_context.cluster_id), str(cluster_len),
+						str(len(cluster_species_list))))
+					logger.debug("Chosen Cluster List: %s" % Chosen_cluster_list)
+					logger.debug("Species List: %s" % cluster_species_list)
+					added_species = list(set(cluster_species_list) - set(ref_species_list))
+					logger.debug("diff_species List: %s" % added_species)
+					# calculate ratio's for weight:
+					cluster_L_ratio = get_cluster_L_ratio(ploidb_context, [cluster_context.cluster_id])
+					weight_flag = ploidb_context.UserFlags_dict['cluster_selection']
+					# weight_flag = 'Maximize_taxa_coverage'
+					# weight_flag = 'Maximize_taxa_coverage'  OR  'Maximize_info'
+					if len(ref_species_list) != 0 and len(cluster_species_list)/len(ref_species_list) <= 0.05:  # cluster with less than 5% of total taxa number
+						logger.debug("Cluster %d has less than 5%% taxa so it will not be added" % cluster_idx)
+						continue
+					if weight_flag == 'Maximize_info':
+						if len(ref_species_list) != 0:  # first cluster selection
+							Taxa_A_ratio = len(cluster_species_list) / len(ref_species_list)
+						else:
+							Taxa_A_ratio = len(cluster_species_list) / 1
+					else:  # weight_flag == 'Maximize_taxa_coverage'
+						if len(ref_species_list) != 0:  # first cluster selection
+							# Taxa_A_ratio = len(added_species) / len(cluster_species_list)
+							if len(added_species) == 0:
+								Taxa_A_ratio = (len(cluster_species_list) / len(ref_species_list))
+							else:  # if there are new taxa then it will enlarge the score of this cluster:
+								Taxa_A_ratio = len(added_species) * (len(cluster_species_list) / len(ref_species_list))
+						else:
+							Taxa_A_ratio = len(cluster_species_list) / 1  # length of 1st cluster
+
+					logger.debug(
+						"Cluster: %d, L_ratio %f, Taxa_A_ratio %f" % (cluster_idx, cluster_L_ratio, Taxa_A_ratio))
+					weight_val = cluster_L_ratio * Taxa_A_ratio
+
+					weight_dict[cluster_context.index] = weight_val
+					logger.debug("Weight %s" % str(weight_dict[cluster_context.index]))
+					length_dict[cluster_context.index] = cluster_len
+					added_species_dict[cluster_context.index] = added_species
+					logger.debug(weight_dict)
+					logger.debug(length_dict)
+			i+=1
+			max_cluster_index = max(weight_dict, key=weight_dict.get)
+			all_cluster_length+=length_dict[max_cluster_index]
+			Chosen_cluster_list.append(max_cluster_index)
+			Chosen_cluster_ids_list.append(max_cluster_index_Id_dict[max_cluster_index])
+			ref_species_list.extend(added_species_dict[max_cluster_index])
+			logger.debug("Updated clusters list: %s" % Chosen_cluster_list)
+			logger.debug("Added species list: %s" % added_species_dict[max_cluster_index])
+			logger.debug("Adding Cluster %s, Total length: %s" %(str(max_cluster_index),str(all_cluster_length)))
+			#Check user outgroup:
+			if 'Outgroup_User' in ploidb_context.UserFlags_dict:
+				for taxID_str in added_species_dict[max_cluster_index]:
+					if taxID_str == ploidb_context.UserOutgroupTaxId:
+						logger.debug("Found User Outgroup in added cluster !!!")
+						ploidb_context.UserOutgroupInc = 'YES'
+				#if str(ploidb_context.UserOutgroupTaxId) in added_species_dict[max_cluster_index]:
+				#	logger.debug("Found User Outgroup in added cluster !!!")
+				#	ploidb_context.UserOutgroupInc = 'YES'
+			if len(Chosen_cluster_list) ==  num_of_clusters:
+				break
+
+
+		#Update summary file in case User outgroup is not included in the output:
+		if 'Outgroup_User' in ploidb_context.UserFlags_dict and ploidb_context.UserOutgroupInc == 'NO':
+			with open(ploidb_context.summary_file,'w') as sum_f:
+				sum_f.write("User Outgroup (%s) is Not included in the final Alignment\n" %ploidb_context.UserFlags_dict['Outgroup_User'])
+			ploidb_context.UserOutgroupInMSA = False
+			#statusFail_LogFile(ploidb_context, 'The User Outgroup you specified was not included in the final MSA and so OneTwoTree did not reconstruct a phylogeny.')
+			#raise Exception(
+			#	"Failed - The User Outgroup you specified was not included in the final MSA and so OneTwoTree did not reconstruct a phylogeny.")
+		elif 'Outgroup_User' in ploidb_context.UserFlags_dict:
+			#Write user outgroup name to file
+			with open(ploidb_context.outgroup_file, 'w') as out_f:
+				out_f.write(ploidb_context.UserFlags_dict['Outgroup_User'])
+			ploidb_context.outgroupSelection = get_selected_outgroup(ploidb_context)
+			with open(ploidb_context.summary_file,'a') as f_sum:
+				f_sum.write("User Selected Outgroup: %s\n" % ploidb_context.outgroupSelection)
+		elif outgroup_selection == 'None':
+			with open(ploidb_context.outgroup_file, 'w') as out_f:
+				out_f.write('None')
+		#Copy chosen clusters to final list:
+		logger.debug("Chosen Cluster index: %s" % Chosen_cluster_list)
+		logger.debug("Chosen Cluster Ids: %s " % Chosen_cluster_ids_list)
+		ploidb_context.cluster_contexts_for_concat_tree = ploidb_context.get_clusters_by_ids(Chosen_cluster_ids_list)
+		logger.debug(ploidb_context.cluster_contexts_for_concat_tree)
+
+		#for cluster_context in ploidb_context.cluster_contexts:
+		for cluster_context in ploidb_context.cluster_contexts_for_concat_tree:
+			if cluster_context.index in Chosen_cluster_list:
+				logger.debug("Adding Cluster %s to concat list" %str(cluster_context.index ))
+				cluster_context.is_used_for_concat_tree = True
+
+
+		#Update SummaryDir with all clusters data:
+		Write_Clusters_data_File(ploidb_context)
+		logger.info("Saving clusters data in %s" % ploidb_context.summary_clusters_data_file)

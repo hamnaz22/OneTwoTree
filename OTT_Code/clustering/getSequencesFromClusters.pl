@@ -5,10 +5,11 @@ if (@ARGV < 3 ){
 	die "usage:
 	(1) input file (groups.txt - orthomcl's output)
 	(2) output directory - will contain a file for each group
-	(3) all sequences fasta file";
+	(3) all sequences fasta file
+	(4) input Taxa number";
 }
 
-my ($input, $outputDir, $fastaAll) = @ARGV;
+my ($input, $outputDir, $fastaAll, $inputTaxaNum) = @ARGV;
 my ($line,$groupName, @group, $GI, %seqsHash,$fileName, $seqCoverage, $numberOfSeqInCluster,  $totalNumberOfSequences, $minSeqCoverage, $header, $sequence);
 my $c = 0;
 my ($genusName) = ($fastaAll =~ m/([^\/]+)-allseq/);
@@ -28,6 +29,7 @@ my @lines = <IN>;
 
 print "Genus name: $genusName\n";
 
+
 foreach my $line (@lines){
 	chomp($line);
 	if ($line =~ m/.+: (.+)/ || $line =~ m/(.+)/){
@@ -41,12 +43,16 @@ foreach my $line (@lines){
 			
 		#count how many organisms exist in the group (cluster)
 		foreach my $ID (@group){
-		    #print "in ID $ID\n";
+		    print "in ID $ID\n";
 			#if($ID =~ m/\d+\|(\d+)/ || $ID =~ m/(\d+)/){
 			if($ID =~ m/\d+\|([A-Z{2}\d]+\.\d+)/ || $ID =~ m/([A-Z{2}\d]+\.\d+)/){
-				$GI = $1;			
+				$GI = $1;
+				print "GI found is $GI\n";
 				$header = $seqsHash{$GI}{"header"};
-				($taxonID) = ($header =~ m/taxonid\|(\d+)\|/);
+				#($taxonID) = ($header =~ m/taxonid\|(\d+)\|/);
+				$header =~ m/taxonid\|(\d+)\|/;
+				$taxonID = $1;
+				print "taxonID is $taxonID\n";
 				if(!defined $taxonID){
 					print "GI: $GI ID: $ID\n";
 				}
@@ -54,11 +60,14 @@ foreach my $line (@lines){
 			}
 		}
 
+		
 		$numOfOrganismsInCluster = scalar(keys(%organismsHash));
         print "organisms in cluster = $numOfOrganismsInCluster\n";
-
-		if ($numOfOrganismsInCluster > 3){ #take only large enough clusters
+        #take only large enough clusters: more than 5 taxa and have more than 5% then input taxa:
+		if (int($numOfOrganismsInCluster) >= 5 && (($numOfOrganismsInCluster/$inputTaxaNum) >= 0.05)){
 		    print "Found large enough cluster $numOfOrganismsInCluster\n";
+		    print "numOfOrganismsInCluster / inputTaxaNum : \n";
+		    print "($numOfOrganismsInCluster)/$inputTaxaNum)\n";
 			open(OUT, ">$fileName") or die "can't open file $fileName";
 			foreach my $ID (@group){
 				#if($ID =~ m/\d+\|(\d+)/ || $ID =~ m/(\d+)/){
@@ -86,10 +95,12 @@ sub fillSeqsHash {
 	my ($line, $GI, $header, $sequence, $restHeader, $oldGI, $fastaSeqObj);
 	while (defined($fastaSeqObj = $in->next_seq())) { #iterate over all the sequences
 		$header = getHeader($fastaSeqObj); #get the header of the fasta entry
-	
+		print "header  --> $header\n";
 		#unique gi:		
-		($GI) = ($header =~ m/gi\|(.+)\|taxonid/);
-		#print "GI=$GI\n";
+		#($GI) = ($header =~ m/gi\|(.+)\|taxonid/);	# original line -> created bug when header contains 2 '|taxonid|'
+		($GI) = ($header =~ m/gi\|(([A-Z{2}\d]+\.\d+))\|taxonid/); #gi\|(([A-Z{2}\d]+\.\d+))\|taxonid
+				
+		print "GI=$GI\n";
 		
 		# index the headers and the sequences in the hash by GI --> header & sequence
 		$seqsHash{$GI}{"header"} = ">$header";

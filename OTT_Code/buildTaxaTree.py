@@ -38,7 +38,17 @@ This file contains the major methods of ploidb pipeline
 
 use_cached_cluster_results = True
 
+#--------------------------------------------------------------------------------------------------------
+def is_empty_file(f_handle):
 
+	for line in f_handle:
+		if not line.strip():
+			continue
+		else:
+			#Not empty
+			return 1
+	#Empty File
+	return 0
 #--------------------------------------------------------------------------------------------------------
 #Perform Ultrametric trees for Examl/Raxml without dating, parameter is method: treepl ot dpp
 def perform_ML_UltrametricNoDate(context,ml_tree_method,tree_file_path):
@@ -50,7 +60,7 @@ def perform_ML_UltrametricNoDate(context,ml_tree_method,tree_file_path):
 		name1,name2 = return_leafEndsNames(tree_file_path)
 		msa_conct_length = return_msa_length(context.concat_seqs_report_filename)
 		create_NameDate_config(context,msa_conct_length,name1,name2,"1","1")
-		cmd_run_tree = 'mpirun -np 4 treePL %s' %context.tree_xml_namedate_config
+		cmd_run_tree = 'mpirun --map-by socket:OVERSUBSCRIBE -np 4 treePL %s' %context.tree_xml_namedate_config
 	elif ml_tree_method == 'dpp':
 		# Use R scipt to remove tree labels. Input params: working_dir, tree, tree_out
 		tree_out_nolabel = tree_file_path +'_NoLbl'
@@ -66,7 +76,7 @@ def perform_ML_UltrametricNoDate(context,ml_tree_method,tree_file_path):
 		os.system('dos2unix ' + tree_out_nolabel)
 		#run dpp on tree file:
 		convert_fasta_to_phylip(context.concat_seqs_fasta_filename, context.concat_seqs_fasta_filename+'_phy')
-		cmd_run_tree = "mpirun -np 4 dppdiv-mpi-sse3 -in %s -out %s -tre %s -sf 100 " \
+		cmd_run_tree = "mpirun --map-by socket:OVERSUBSCRIBE -np 4 dppdiv-mpi-sse3 -in %s -out %s -tre %s -sf 100 " \
 					   "-n 10000" %(context.concat_seqs_fasta_filename+'_phy',context.xml_dir+'/UltrametricTree.tree',
 									tree_out_nolabel)
 
@@ -105,7 +115,7 @@ def perform_ML_UltrametricWithDate(context,ml_tree_method,tree_file_path,NameDat
 	os.chdir(context.xml_dir)
 	if ml_tree_method == 'treepl':
 		if NameDate_missingName_Flag == 'No': #verify the names are in the final msa
-			cmd_run_tree = 'mpirun -np 4 treePL %s' %context.tree_xml_namedate_config
+			cmd_run_tree = 'mpirun --map-by socket:OVERSUBSCRIBE -np 4 treePL %s' %context.tree_xml_namedate_config
 		else:
 			logger.debug("Species given are not on the final tree (since they were not included in final alignment)")
 			with open(context.final_status, 'w') as f_status:
@@ -128,7 +138,7 @@ def perform_ML_UltrametricWithDate(context,ml_tree_method,tree_file_path,NameDat
 		os.system('dos2unix ' + tree_out_nolabel)
 		#run dpp on tree file:
 		convert_fasta_to_phylip(context.concat_seqs_fasta_filename, context.concat_seqs_fasta_filename+'_phy')
-		cmd_run_tree = "mpirun -np 4 dppdiv-mpi-sse3 -in %s -out %s -tre %s -sf 100 -n 10000" \
+		cmd_run_tree = "mpirun --map-by socket:OVERSUBSCRIBE -np 4 dppdiv-mpi-sse3 -in %s -out %s -tre %s -sf 100 -n 10000" \
 							  %(context.concat_seqs_fasta_filename+'_phy',context.xml_dir+'/UltrametricTree.tree',tree_out_nolabel)
 
 	tree_run_out = context.concat_workdir + '/TreeUltra.out'
@@ -414,7 +424,8 @@ def Rerun_flow(rerunJobID, context):
 	#---------------------------------------------------------------------
 	context.outgroupSelection = rerun_get_selected_outgroup(
 		os.path.join(context.UserFlags_dict['OriginJobDir'], "OutgroupSelection.txt"))
-	shutil.copyfile(context.UserFlags_dict['OriginJobDir'] + "/OutgroupSelection.txt",
+	if context.outgroupSelection != 'NoOutgroupFile':
+		shutil.copyfile(context.UserFlags_dict['OriginJobDir'] + "/OutgroupSelection.txt",
 					context.working_dir + '/OutgroupSelection.txt')
 
 	#get the constraint file from the original run
@@ -792,7 +803,7 @@ def Build_examl_Tree(Alignment_file, context, xml_model):
 
 	# 4. module load rocks-openmpi
 	# 5. mpirun -np num_threads examl -s binary_alignment -t parsimony_tree -m GTRGAMMAI -n output_name -S
-	examl_cmd = 'mpirun -np %d examl -s %s -t %s -m %s -n %s' % (
+	examl_cmd = 'mpirun --map-by socket:OVERSUBSCRIBE -np %d examl -s %s -t %s -m %s -n %s' % (
 		Xthred, parse_out_name + '.binary', 'RAxML_parsimonyTree.' + 'RaxmlPreExaml_' + context.id, xml_model,
 		'Examl_' + context.id)
 
@@ -808,13 +819,24 @@ def Build_examl_Tree(Alignment_file, context, xml_model):
 	logger.debug("Execute Examl cmd: %s" % examl_cmd)
 	#Create .sh file for module load + final run:
 	sh_file_examl = open(context.xml_dir + '/examl_run.sh', 'w')
-	sh_file_examl.write('#!/bin/tcsh\n')
+	sh_file_examl.write('#!/bin/bash\n')
+	sh_file_examl.write('#PBS -N Exml_%s\n' %context.id)
+	sh_file_examl.write('#PBS -r y\n')
+	sh_file_examl.write('#PBS -q lifesciweb\n')
+	sh_file_examl.write('#PBS -v PBS_O_SHELL=bash,PBS_ENVIRONMENT=PBS_BATCH\n')
+	sh_file_examl.write('#PBS -e %s\n' %(context.xml_dir+'/'))
+	sh_file_examl.write('#PBS -o %s\n' %(context.xml_dir+'/'))
+	sh_file_examl.write('#PBS -l select=%d\n' %Xthred)
+	#sh_file_examl.write('#PBS -l select=ncpus=%d:mem=1gb:host=compute-0-249\n' %Xthred)
+	#sh_file_examl.write('#PBS -l select=ncpus=%d:host=compute-0-249\n' %Xthred)
+	# PBS -l select=ncpus=1:mem=4gb:host=compute-0-247
 	sh_file_examl.write('\n')
 	sh_file_examl.write('cd %s/\n' % context.xml_dir)
-	sh_file_examl.write('module load rocks-openmpi\n')
+	sh_file_examl.write('module load mpi/openmpi-1.10.4\n')
+	sh_file_examl.write('module load ExaML/examl-2018\n')
 	sh_file_examl.write('%s\n' % examl_cmd)
 	sh_file_examl.close()
-	os.system('tcsh %s' % (context.xml_dir + '/examl_run.sh'))
+	os.system('bash %s' % (context.xml_dir + '/examl_run.sh'))
 
 	shutil.copyfile('ExaML_result.Examl_' + context.id,
 					context.summary_dir + '/Result_Tree_' + context.id + '.tre')
@@ -908,7 +930,7 @@ def Build_examl_Boots_Tree(Alignment_file, context, xml_model,bootstrap_val,outg
 	#5. Run ExaML with mpi
 		parse_BST_parsTree = 'RAxML_parsimonyTree._ParsTree'+str(Boots_idx)
 		#examl_bs_tree_cmd = 'mpirun -np %d examl -s ../phy_bin.binary -n examlOut -m GAMMA -t %s' %(Xthred,parse_BST_parsTree)
-		examl_bs_tree_cmd = 'mpirun -np %d examl -s ParseBinar.binary -n examlOut -m GAMMA -t %s' %(Xthred,parse_BST_parsTree)
+		examl_bs_tree_cmd = 'mpirun --map-by socket:OVERSUBSCRIBE -np %d examl -s ParseBinar.binary -n examlOut -m GAMMA -t %s' %(Xthred,parse_BST_parsTree)
 
 		#Constraint tree options:
 		#First we need to check if the constarint tree includes all species in the fional alignment, otherwise it will not work:
@@ -919,20 +941,6 @@ def Build_examl_Boots_Tree(Alignment_file, context, xml_model,bootstrap_val,outg
 
 		logger.debug("Execute examl run per BS parsimony input tree: %s" % examl_bs_tree_cmd)
 		os.system(examl_bs_tree_cmd)
-		#Create .sh file for module load + final run:
-
-		##sh_file_examl = open(BS_idx_Dir + '/examl_run_BS'+str(Boots_idx)+'.sh', 'w')
-		##sh_file_examl.write('#!/bin/tcsh\n')
-		##sh_file_examl.write('\n')
-		##sh_file_examl.write('#$ -p -1\n')
-		##sh_file_examl.write('#$ -l h=!(compute-7-1|compute-8-13)\n')
-		##sh_file_examl.write('\n')
-		##sh_file_examl.write('cd %s/\n' % BS_idx_Dir)
-		##sh_file_examl.write('module load rocks-openmpi\n')
-		##sh_file_examl.write('%s\n' % examl_bs_tree_cmd)
-		##sh_file_examl.close()
-		##os.system('qsub examl_run_BS'+str(Boots_idx)+'.sh') #examl_run_BS0.sh
-
 
 		###for filename in glob.glob(BS_idx_Dir+'/*binaryCheckpoint*'):
 		#	os.remove(filename)
@@ -1406,6 +1414,8 @@ def UpdateContextFlags(context):
 						f_status.write("Failed - %s \n" % status_line)
 					raise Exception("Failed - User outgroup name must be a species and not high ranked taxa")
 
+	context.UserFlags_dict['cluster_selection'] = 'Maximize_taxa_coverage'
+
 	if context.UserFlags_dict['Outgroup_Flag'] == 'User':
 		#Check user entered User name outgroup:
 		if 'Outgroup_User' not in context.UserFlags_dict.keys():
@@ -1605,13 +1615,17 @@ def cluster_sequences_file_with_orthomcl(fasta_seq_filename, id, scripts_path, g
 	#check if input for orthomcl has enough data: (michal: need to check how to handle small input to orthomcl)
 	#number_of_taxa,list_of_taxa=count_taxa_in_fasta(orthomcl_fasta_input)
 	#if (number_of_taxa >= 5):
+
+	# Pass the input species length so it will se4rve as cutt-off for selecting clusters
+	# (No need to handle clusters and rtun blast if they have less than 5% of total input ):
+	max_taxa_num = len(context.species_list_names)
 	if context.UserFlags_dict['ClusteringMethod'] == 'Ortho':
 		filter_ratio = context.UserFlags_dict['orthoSeq_Ratio']
 		orthomcl_bin_path = ott_config['orthomcl']['orthomcl_bin']
 		logger.debug("Clustering parameters: Method is Orthomcl, sequence ratio = %s, Inflation Index = %s" % (filter_ratio, orthomcl_inflation))
 		clusteringCommand = "perl " + scripts_path + "orthomcl.pl " + orthomcl_fasta_input + " " + id + " 50 " \
 						  + orthomcl_inflation + " " + scripts_path + " " + gb_seq_filename + " " + output_dir + " " \
-						  + args.config_filename + " " + filter_ratio + " " + orthomcl_bin_path
+						  + args.config_filename + " " + filter_ratio + " " + orthomcl_bin_path + " " + str(max_taxa_num)
 		logger.info("Calling orthomcl - " + clusteringCommand)
 	else: #perform BlastClust
 		PrecentIdentity = context.UserFlags_dict['BC_percentIdentity']
@@ -1630,6 +1644,7 @@ def cluster_sequences_file_with_orthomcl(fasta_seq_filename, id, scripts_path, g
 		shutil.rmtree(context.clustering_results_dir)
 	logger.debug("Copying %s to %s" % (output_dir + "_seqs", context.clustering_results_dir))
 	shutil.copytree(output_dir + "_seqs", context.clustering_results_dir)
+
 
 	logger.info("DONE Clustering sequences data for " + id + " using %s" %context.UserFlags_dict['ClusteringMethod'])
 
@@ -1708,6 +1723,7 @@ def cluster_ITS(context, fasta_seq_filename, scripts_path, gb_seq_filename):
 					logger.debug("ITS seq found for taxId %s" %taxonId)
 					if taxonId not in list_its_taxas:
 						list_its_taxas.append(taxonId)
+	logger.debug("ITS sequences are available for %s, minimum is %s species" %(len(list_its_taxas),min_species_in_cluster))
 	if len(list_its_taxas) < min_species_in_cluster:
 		logger.debug("ITS sequences are available for less than %s species, there will be no ITS cluster in this case")
 		context.its_min_taxa = 'no'
@@ -1719,8 +1735,32 @@ def cluster_ITS(context, fasta_seq_filename, scripts_path, gb_seq_filename):
 
 	#Insert an option for ITS flow using the new Database:
 	logger.debug("Using ITS python version - DEBUG mode:")
-	main_ITS_py(context,output_dir, fasta_only_its_filtered, gb_seq_filename, scripts_dir, args.config_filename, context.should_run_guidance, context.UserFlags_dict['MSA_Software'])
+	main_ITS_py(context, output_dir, fasta_only_its_filtered, gb_seq_filename, scripts_dir,
+								   args.config_filename, context.should_run_guidance,
+								   context.UserFlags_dict['MSA_Software'], "1")
 
+
+	for ITS_dir in context.its_cluster_list:
+		logger.debug("ITS cluster at: %s" %ITS_dir)
+		r = re.compile('ITS_cluster_(\d)')
+		m = r.search(ITS_dir)
+		if m:
+			NUM_its = m.group(1)
+			logger.debug("ITS Num cluster %s" %NUM_its )
+			with open(ITS_dir + '/ITS_CLUSTER_' + NUM_its, 'w') as f_flag_its:
+				f_flag_its.close()
+
+			fasta_only_its_filtered = ITS_dir + '/ITSclst-allseq-its-only.fasta'
+			main_ITS_py(context, ITS_dir, fasta_only_its_filtered, gb_seq_filename, scripts_dir,
+									   args.config_filename, context.should_run_guidance,
+									   context.UserFlags_dict['MSA_Software'], ITS_dir)
+
+		if context.UserFlags_dict['FilterMSA_Method'] == 'Trimal':
+			logger.debug("ITS MSA Filter method: Trimal")
+			runTrimal(ITS_dir + '/oneSeqPerSpecies.msa', context.UserFlags_dict['Trimal_CutOff'])
+		elif context.UserFlags_dict['FilterMSA_Method'] == 'Gblocks':
+			logger.debug("ITS MSA Filter method: Gblocks")
+			runGblocks(ITS_dir + '/oneSeqPerSpecies.msa', context.UserFlags_dict)
 
 	#Call filter method if needed:
 	if context.UserFlags_dict['FilterMSA_Method'] == 'Trimal':
@@ -1730,6 +1770,7 @@ def cluster_ITS(context, fasta_seq_filename, scripts_path, gb_seq_filename):
 		logger.debug("ITS MSA Filter method: Gblocks")
 		runGblocks(output_dir + '/oneSeqPerSpecies.msa', context.UserFlags_dict)
 
+	return
 
 def get_schema_name_for_genus(genus_taxon_id):
 	return "o_%s" % genus_taxon_id
@@ -1816,9 +1857,13 @@ def run_guidance(context, fasta_filename, output_dir, dataset="MSA"):
 	logger.info("STARTING Guidance execution on %s. Work dir is %s" % (fasta_filename, output_dir))
 
 	if context.UserFlags_dict['MSA_Software'] == 'ClustalOmega':
-		guidance_command = 'perl %s --seqFile %s ' \
-						   '--msaProgram CLUSTALO --clustalo %s --seqType nuc --outDir %s --dataset %s --program GUIDANCE --TreeAlg FastTree --Tree_Param \\\\-fastest' % (
-							   ott_config['diff_soft']['Guidance'],fasta_filename, ott_config['diff_soft']['ClastaO'], output_dir, dataset)
+		#NOT functinal yet !!!
+		#guidance_command = 'perl %s --seqFile %s ' \
+		#				   '--msaProgram CLUSTALO --clustalo %s --seqType nuc --outDir %s --dataset %s --program GUIDANCE --TreeAlg FastTree --Tree_Param \\\\-fastest' % (
+		#					   ott_config['diff_soft']['Guidance'],fasta_filename, ott_config['diff_soft']['ClastaO'], output_dir, dataset)
+		guidance_command = 'perl %s --program GUIDANCE --seqFile %s ' \
+						   '--msaProgram MAFFT --seqType nuc --outDir %s --dataset %s --MSA_Param "\-\-adjustdirection"' % (
+							ott_config['diff_soft']['Guidance'],fasta_filename, output_dir, dataset)
 	else:
 		guidance_command = 'perl %s --program GUIDANCE --seqFile %s ' \
 						   '--msaProgram MAFFT --seqType nuc --outDir %s --dataset %s --MSA_Param "\-\-adjustdirection"' % (
@@ -1869,7 +1914,8 @@ def run_guidance_for_seqs_and_columns(fasta_filename, guidance_work_dir1, guidan
 	#Check which MSA method for guidance file names MAFFT or CLUSTALO (e.g. MSA.MAFFT.Without_low_SP_Col.With_Names
 	#  or   MSA.CLUSTALO.Without_low_SP_Col.With_Names)
 	if context.UserFlags_dict['MSA_Software'] == 'ClustalOmega':
-		guidanceMSA_name = 'CLUSTALW'
+		#guidanceMSA_name = 'CLUSTALW'	# Not implemented yet !!
+		guidanceMSA_name = 'MAFFT'
 	else:
 		guidanceMSA_name = 'MAFFT'
 
@@ -2161,9 +2207,16 @@ def merge_syn_seqs_with_accepted_species(context):
 	#Now we need to handle all Large species which are synonyms of regular species:
 	large_renewd_list = []
 	for large_taxa in context.large_taxid_seqs_number_dict.keys():
+		large_renewd_list = []
 		large_fasta_file = context.largeSpeciesDir + '/seqs_for_LargeTaxId_' + str(large_taxa) + '.fasta'
+		logger.debug("LargeDebug: large taxa is %s, %d" %(str(large_taxa),int(large_taxa)))
+		logger.debug("LargeDebug: file input %s" % large_fasta_file)
 		curr_large_seqs = list(SeqIO.parse(large_fasta_file, "fasta"))
 		for seq in curr_large_seqs:
+			original_tax_id = getPropertyFromFastaSeqHeader(seq.description, "taxonid")
+			original_name = getPropertyFromFastaSeqHeader(seq.description, "organism")
+			logger.debug("LargeDebug: original_tax_id is %s" % str(original_tax_id))
+			logger.debug("LargeDebug: original_name is %s" % str(original_name))
 			if large_taxa in context.syn_acc_TaxID_dict.keys():
 				parent_tax_id = context.syn_acc_TaxID_dict[large_taxa]
 				parent_name= context.syn_acc_dict[parent_tax_id]
@@ -2188,7 +2241,6 @@ def merge_syn_seqs_with_accepted_species(context):
 
 
 	logger.info("Finished merging synonyms sequences with their accepted species sequences")
-	#sys.exit()
 	return
 
 def perform_filter_msa(ploidb_context, msa_file):
@@ -2362,14 +2414,22 @@ def process_seq_and_create_concat_file(context, genus_name, outgrouup_selection)
 		else:
 			logger.debug("Creating Final list from concat file:")
 			for line in f_alignment:
-				if '>' in line and context.outgroupSelection not in line:
+				#Check if outgroup was found (not None)
+				if context.outgroupSelection:
+					if '>' in line and context.outgroupSelection not in line:
+						line = line.strip()
+						logger.debug(line)
+						spc_name = line.replace('>', '').replace('_', ' ')
+						#f_finalNames.write('%s,%s\n' %(context.Pipe_input_Spc_Names_vs_TaxId[spc_name],spc_name))
+						#f_finalNames.write('%s,%s\n' %(context.species_names_by_tax_id[spc_name],spc_name))
+						f_finalNames.write('%s\n' %(spc_name))
+						context.list_final_species_names.append(spc_name)
+				else:
 					line = line.strip()
-					logger.debug(line)
 					spc_name = line.replace('>', '').replace('_', ' ')
-					#f_finalNames.write('%s,%s\n' %(context.Pipe_input_Spc_Names_vs_TaxId[spc_name],spc_name))
-					#f_finalNames.write('%s,%s\n' %(context.species_names_by_tax_id[spc_name],spc_name))
-					f_finalNames.write('%s\n' %(spc_name))
+					f_finalNames.write(spc_name + '\n')
 					context.list_final_species_names.append(spc_name)
+					logger.debug("Outgroup was not found !!!")
 		f_finalNames.close()
 		f_alignment.close()
 
@@ -2813,11 +2873,19 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 		"Checking species list length. Species list contains %d species, max number of species allowed is %d" % (
 			species_list_length, max_number_of_species))
 	if species_list_length > max_number_of_species:
+		statusFail_LogFile(context, 'Species list is Too long: %d species found, max number allowed is %d'%(species_list_length, max_number_of_species))
 		with open(context.summary_file, 'a') as f_sum:
 			f_sum.write("EndStatus: Species list is Too long: %d species found, max number allowed is %d. Please contact us to enable this run.\n" %
 						(species_list_length, max_number_of_species))
 		raise Exception("Species list is to long. It contains %d species, max number of species allowed is %d" % (
 			species_list_length, max_number_of_species))
+	#DEBUG - Check if to limit minimum spc
+	#if species_list_length < max_number_of_species:
+	#	with open(context.summary_file, 'a') as f_sum:
+	#		f_sum.write("EndStatus: Species list is Too long: %d species found, max number allowed is %d. Please contact us to enable this run.\n" %
+	#					(species_list_length, max_number_of_species))
+	#	raise Exception("Species list is to long. It contains %d species, max number of species allowed is %d" % (
+	#		species_list_length, max_number_of_species))
 
 	# ------------------------------------
 	# Getting sequences for all taxa list taxon_names
@@ -2878,7 +2946,7 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 			original_tax_id = getPropertyFromFastaSeqHeader(seq.description, "taxonid")
 			original_name = getPropertyFromFastaSeqHeader(seq.description, "organism")
 			#Update original vs acc name dict:
-			logger.info("Merge Syn was not selected, initialize array for Merge Subsp:")
+			#logger.info("Merge Syn was not selected, initialize array for Merge Subsp:")
 			context.original_vs_newName_dict[str(original_name)]=str(original_name)
 			context.spc_tax_afterMatch_dict[str(original_name)]=str(original_tax_id)
 
@@ -2953,12 +3021,11 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 	else:
 		if context.its_support:
 			logger.info("Adding ITS FASTA files as ITS clusters")
-			its_context = context.add_its_final_cluster()
-			#Create ITS flagFile:
-			with open(its_context.cluter_work_dir + '/ITS_CLUSTER', 'w') as f_flag_its:
-				f_flag_its.close()
-			if its_context is None:
-				logger.info("ITS final cluster was empty and was not added")
+			context.add_its_final_cluster()
+			#if its_context is None:
+			#	logger.info("ITS final cluster was empty and was not added")
+
+
 
 	# ------------------------------------
 	# MD: checking the min cutoff for species number (need to coun also large species)
@@ -2973,12 +3040,18 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 
 	# MD- Need to add -> Change the code so it will run in parallel:
 	for cluster_context in context.cluster_contexts:
+		Not_ITS_flag=0
 		cluster_dir = os.path.dirname(cluster_context.all_seqs_fasta_filename)
-		if not os.path.exists(cluster_dir+'/ITS_CLUSTER'):
+		ITS_options = ['ITS_CLUSTER','ITS_CLUSTER_2', 'ITS_CLUSTER_3', 'ITS_CLUSTER_4', 'ITS_CLUSTER_5']
+		logger.debug("Check for ITS clusters to avoid mutiple accession removal: %s" %cluster_dir)
+		for its_op in ITS_options:
+			if os.path.exists(cluster_dir+'/' +its_op):
+				Not_ITS_flag = 1
+				logger.debug("This is an ITS cluster, skip blast and copy file")
+				shutil.copyfile(cluster_context.all_seqs_fasta_filename,
+								cluster_dir + '/seqs-no-multiple-accessions.fasta')
+		if Not_ITS_flag == 0:
 			init_cluster_mult_acc_and_db(cluster_context, context, cluster_script_dir, outgrouup_selection)
-		else:
-			logger.debug("This is an ITS cluster, skip blast and copy file")
-			shutil.copyfile(cluster_context.all_seqs_fasta_filename,cluster_dir + '/seqs-no-multiple-accessions.fasta')
 
 	# Sorting the cluster contexts according to the number of species in each cluster
 	context.cluster_contexts.sort(key=lambda cluster_context: cluster_context.get_number_of_different_species(),
@@ -2990,7 +3063,7 @@ def generate_taxa_tree(id, taxa_list, working_dir, log_filename, debug_filename,
 	#	statusFail_LogFile(context, 'Not enough data in clusters')
 	#	return
 
-
+	#sys.exit()
 	#---------------------------------------------------------------------
 	# NEW NEW NEW
 	#MD (NEW)  -  Check if this is the correct position for adding Large Species: species with large number of sequences in genbank:

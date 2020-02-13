@@ -5,6 +5,7 @@ from Bio import SeqIO, Phylo
 import os
 import sys
 #from ott_objects_defs.ploidbCommon import getPropertyFromFastaSeqHeader, exec_external_command_redirect_output, write_standarize_fasta
+sys.path.insert(0, '/bioseq/oneTwoTree/ott_objects_defs')
 from ott_objects_defs.ploidbCommon import *
 
 """

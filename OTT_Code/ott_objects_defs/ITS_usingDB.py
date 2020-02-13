@@ -16,8 +16,16 @@ from buildTaxaTree import perform_filter_msa
 from pandas import Series
 
 
+
 __author__ = 'ItayM3'
 
+#-------------------------------------------------------------------------------------------------------
+def write_to_fasta(out_fasta_filename, seq_list):
+	ordered_seqs = get_ordered_seqs(seq_list)
+	with open(out_fasta_filename, 'a') as out_handle:
+		for seq in ordered_seqs:
+			seq.id=seq.description
+			SeqIO.write(seq, out_handle, "fasta")
 #-------------------------------------------------------------------------------------------------------
 def prepare_files_for_concat(indexIts12FileName):
 
@@ -94,7 +102,34 @@ def is_empty_file(f_handle):
 
 
 #--------------------------------------------------------------------------------------------------------------
+def clear_duplicated_header(ITS_fasta_file):
+
+	temp_fasta_f = open(ITS_fasta_file + '_TEMP','w')
+	with open(ITS_fasta_file,'r') as fasta_f:
+		for line in fasta_f:
+			line=line.strip()
+			if '>' in line:
+				line_spl=line.split(' gi|')
+				temp_fasta_f.write(line_spl[0]+'\n')
+			else:
+				temp_fasta_f.write(line+'\n')
+
+	temp_fasta_f.close()
+	fasta_f.close()
+	shutil.copyfile(ITS_fasta_file + '_TEMP',ITS_fasta_file)
+
+	return
+
+
+#--------------------------------------------------------------------------------------------------------------
 # This function will run guidance ...
+# ???
+# for combined+sep it will use addfrag option. also the msa will be performed according to user choice
+# Guidance output:
+# MSA without problematic columns: MSA.MAFFT.Without_low_SP_Col.With_Names
+# if 'Seqs.Orig.fas.FIXED.Removed_Seq' file is not empty:
+# take sequence file(un-aligned): Seqs.Orig.fas.FIXED.Without_low_SP_Seq.With_Names
+# run guidance again and then take: MSA.MAFFT.Without_low_SP_Col.With_Names
 #--------------------------------------------------------------------------------------------------------------
 def new_guidance_for_its(context,sequencesOfCoreMSA, fragments, outDir):
 
@@ -120,40 +155,153 @@ def new_guidance_for_its(context,sequencesOfCoreMSA, fragments, outDir):
 
 	#Once guidance ran we check if any seqs need to be removed:
 	remove_seq_f =  outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq.With_Names"
+
 	removed_acc_id_list=[]
 	if os.stat(remove_seq_f).st_size != 0:
-		records_list = list(SeqIO.parse(remove_seq_f, "fasta"))
-		records_core_list = list(SeqIO.parse(sequencesOfCoreMSA, "fasta"))
-		records_frag_list = list(SeqIO.parse(fragments, "fasta"))
-		for seq in records_list:
-			seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
-			removed_acc_id_list.append(seq_id)
-		for seq in records_core_list:
-			seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
-			if seq_id not in removed_acc_id_list:
-				Final_records.append(seq_id)
-		SeqIO.write(Final_records, sequencesOfCoreMSA, "fasta")
-		for seq in records_frag_list:
-			seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
-			if seq_id not in removed_acc_id_list:
-				Final_records.append(seq_id)
-		SeqIO.write(Final_records, records_frag_list, "fasta")
+		NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Without_low_SP_Seq.With_Names"
+		#NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq.With_Names"
+		New_Its_dir = context.cluter_its_dir + '/its_after_SeqGuidanceRemoval'
+		create_dir_if_not_exists(New_Its_dir)
+		scripts_dir = context.cluster_script_dir + "/clustering"
+		#make sure the header is not duplicated (NEED to CHECK why this is happening!!!)
+		shutil.copyfile(NewInput_f,New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta')
+		clear_duplicated_header(New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta')
+		# Re-Run ITS with new  input data:
+		logger.debug("Run ITS cluster after guidance:")
+		main_ITS_py(context, New_Its_dir, New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta', context.gb_seq_filename, scripts_dir, scripts_dir,
+					False, context.UserFlags_dict['MSA_Software'])
+		shutil.copyfile(New_Its_dir + '/oneSeqPerSpecies.msa',outDir + '/oneSeqPerSpecies.msa')
+		retval = 0
+	#records_list = list(SeqIO.parse(remove_seq_f, "fasta"))
+		#records_core_list = list(SeqIO.parse(sequencesOfCoreMSA, "fasta"))
+		#records_frag_list = list(SeqIO.parse(fragments, "fasta"))
+		#for seq in records_list:
+		#	seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		#	removed_acc_id_list.append(seq_id)
+		#for seq in records_core_list:
+		#	seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		#	if seq_id not in removed_acc_id_list:
+		#		Final_records.append(seq_id)
+		#SeqIO.write(Final_records, sequencesOfCoreMSA, "fasta")
+		#for seq in records_frag_list:
+		#	seq_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		#	if seq_id not in removed_acc_id_list:
+		#		Final_records.append(seq_id)
+		#SeqIO.write(Final_records, records_frag_list, "fasta")
 
 
 
-	if retval != 0:
-		with open(context.final_status, 'w') as f_status:
-			f_status.write("ITS-guidance-Failed")
-		raise Exception("ITS guidance failed: Failed to choose the final tree")
-	else:
-		last_output_from_guidance = outDir + "/MSA."+guidanceMSA_name+".Without_low_SP_Col.With_Names"
-		logger.info("Copying final guidance/alignment results from %s to %s" % (last_output_from_guidance, fasta_final_output))
-		shutil.copy(last_output_from_guidance, fasta_final_output)
+	#if retval != 0:
+	#	with open(context.final_status, 'w') as f_status:
+	#		f_status.write("ITS-guidance-Failed")
+	#	raise Exception("ITS guidance failed: Failed to choose the final tree")
+	#else:
+	#	last_output_from_guidance = outDir + "/MSA."+guidanceMSA_name+".Without_low_SP_Col.With_Names"
+	#	logger.info("Copying final guidance/alignment results from %s to %s" % (last_output_from_guidance, fasta_final_output))
+	#	shutil.copy(last_output_from_guidance, fasta_final_output)
 
 
 	return
-
 #--------------------------------------------------------------------------------------------------------------
+def new_guidance_for_its_Both(context,sequencesOfCoreMSA, fragments, outDir):	#Both Rows and Columns
+
+	if context.UserFlags_dict['MSA_Software'] == 'ClustalOmega':
+		guidanceMSA_name = 'CLUSTALW'
+	else:
+		guidanceMSA_name = 'MAFFT'
+	guidance_path = ott_config['diff_soft']['Guidance']
+
+	#Check if needs to add fragments of spe1_2:
+	if fragments != 'None':
+		guidance_cmd = "perl %s --program GUIDANCE --seqFile %s --msaProgram MAFFT --seqType nuc --outDir %s " \
+					   "--MSA_Param \"\\-\\-adjustdirection \\-\\-addfragments %s \\-\\-multipair\"" %(guidance_path,sequencesOfCoreMSA,outDir,fragments)
+	else:
+		guidance_cmd = "perl %s --program GUIDANCE --seqFile %s --msaProgram MAFFT --seqType nuc --outDir %s " \
+					   "--MSA_Param \"\\-\\-adjustdirection\"" % (
+					   guidance_path, sequencesOfCoreMSA, outDir)
+
+	#This is the final msa that is copied into the ITS cluster dir under the concat dir:
+	fasta_final_output = outDir + '/oneSeqPerSpecies.msa'
+	logger.debug("ITS guidance cmd: %s" % guidance_cmd)
+	retval = exec_external_command_redirect_output(guidance_cmd)
+
+	#Once guidance ran we check if any seqs need to be removed:
+	remove_seq_f =  outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq"
+
+	removed_acc_id_list=[]
+	if os.path.exists(remove_seq_f):
+		if os.stat(remove_seq_f).st_size != 0:
+			NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Without_low_SP_Seq.With_Names"	#fasta without filtered sequences
+			#NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq.With_Names"
+			New_Its_dir = context.cluter_its_dir + '/its_after_SeqGuidanceRemoval'
+			create_dir_if_not_exists(New_Its_dir)
+			scripts_dir = context.cluster_script_dir + "/clustering"
+			#make sure the header is not duplicated (NEED to CHECK why this is happening!!!)
+			shutil.copyfile(NewInput_f,New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta')
+			clear_duplicated_header(New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta')
+			# Re-Run ITS with new  input data:
+			logger.debug("Run ITS cluster after guidance:")
+			main_ITS_2nd_py(context, New_Its_dir, New_Its_dir+'/2nd_ITS_after_guidance_filtered.fasta', context.gb_seq_filename, scripts_dir, scripts_dir,
+						'GUIDANCE', context.UserFlags_dict['MSA_Software'])
+			shutil.copyfile(New_Its_dir + '/oneSeqPerSpecies.msa',outDir + '/oneSeqPerSpecies.msa')
+			retval = 0
+	return
+
+def new_guidance_for_its_Col(context, sequencesOfCoreMSA, fragments, outDir):  # Both Rows and Columns
+
+	logger.debug("new_guidance_for_its_Col:")
+	logger.debug(sequencesOfCoreMSA)
+	logger.debug(outDir)
+	logger.debug(fragments)
+	# --------------------------------------------------------------------------------------------------------------
+	if context.UserFlags_dict['MSA_Software'] == 'ClustalOmega':
+		guidanceMSA_name = 'CLUSTALW'
+	else:
+		guidanceMSA_name = 'MAFFT'
+	guidance_path = ott_config['diff_soft']['Guidance']
+
+	# Check if needs to add fragments of spe1_2:
+	if fragments != 'None':
+		guidance_cmd = "perl %s --program GUIDANCE --seqFile %s --msaProgram MAFFT --seqType nuc --outDir %s " \
+					   "--MSA_Param \"\\-\\-adjustdirection \\-\\-addfragments %s \\-\\-multipair\"" % (
+						   guidance_path, sequencesOfCoreMSA, outDir, fragments)
+	else:
+		guidance_cmd = "perl %s --program GUIDANCE --seqFile %s --msaProgram MAFFT --seqType nuc --outDir %s " \
+					   "--MSA_Param \"\\-\\-adjustdirection\"" % (
+						   guidance_path, sequencesOfCoreMSA, outDir)
+
+	# This is the final msa that is copied into the ITS cluster dir under the concat dir:
+	fasta_final_output = outDir + '/oneSeqPerSpecies.msa'
+	logger.debug("ITS guidance cmd: %s" % guidance_cmd)
+	retval = exec_external_command_redirect_output(guidance_cmd)
+
+	shutil.copyfile(outDir + '/.msa', outDir + '/oneSeqPerSpecies.msa')
+	return
+	#sys.exit()
+	# Once guidance ran we check if any seqs need to be removed:
+	remove_seq_f = outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq"
+
+	removed_acc_id_list = []
+	if os.stat(remove_seq_f).st_size != 0:
+		NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Without_low_SP_Seq.With_Names"  # fasta without filtered sequences
+		# NewInput_f = outDir + "/Seqs.Orig.fas.FIXED.Removed_Seq.With_Names"
+		New_Its_dir = context.cluter_its_dir + '/its_after_SeqGuidanceRemoval'
+		create_dir_if_not_exists(New_Its_dir)
+		scripts_dir = context.cluster_script_dir + "/clustering"
+		# make sure the header is not duplicated (NEED to CHECK why this is happening!!!)
+		shutil.copyfile(NewInput_f, New_Its_dir + '/2nd_ITS_after_guidance_filtered.fasta')
+		clear_duplicated_header(New_Its_dir + '/2nd_ITS_after_guidance_filtered.fasta')
+		# Re-Run ITS with new  input data:
+		logger.debug("Run ITS cluster after guidance:")
+		main_ITS_py(context, New_Its_dir, New_Its_dir + '/2nd_ITS_after_guidance_filtered.fasta',
+					context.gb_seq_filename, scripts_dir, scripts_dir,
+					False, context.UserFlags_dict['MSA_Software'])
+		shutil.copyfile(New_Its_dir + '/oneSeqPerSpecies.msa', outDir + '/oneSeqPerSpecies.msa')
+		retval = 0
+	return
+
+
+# --------------------------------------------------------------------------------------------------------------
 # This function will run guidance either on combined+sep / combined files.
 # for combined+sep it will use addfrag option. also the msa will be performed according to user choice
 # Guidance output:
@@ -351,6 +499,7 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 			os.system("python %s -i %s" %(adjustDirScript,combinedFasta))
 
 
+
 		# create MSA of the combined sequences (contain both ITS1 and ITS2)
 		if (combinedCount > 1):
 			combined = OutDir + "/combined.msa"
@@ -390,7 +539,8 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 			# system "mafft --retree 2 --maxiterate 0 --bl 62 --op 1.530000 --ep 0.000000 $ITS1Fasta > OutDir/ITS1_only.msa" ; #-bl 62 , --op 1.530000 -> is default, --ep 0.000000 allows large gaps !!!
 			outputFileName = OutDir + "/ITS1_only.msa"
 		elif(ITS1count == 1):
-			outputFileName = ITS1Fasta
+			outputFileName = OutDir + "/ITS1_only.msa"
+			shutil.copyfile(ITS1Fasta, outputFileName)
 
 		# MSA for ITS2 sequences (if more than one exist)
 		if (ITS2count > 1):
@@ -407,7 +557,8 @@ def ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,ITS1Fasta, ITS2Fasta,
 				#Concat ITS1 & ITS2:
 				outputFileName = OutDir + "/SEP_ITS1+ITS2.msa"
 				prepare_files_for_concat(indexIts12FileName)
-				concat_align_command = "perl /groups/pupko/haim/pupkoSVN/trunk/programs/indelReliability/ConcateAlignments.pl %s %s %s NO NA NA" % \
+				concatAlignPAth = ott_config['general']['OTT_MAIN'] + '/ott_scripts'
+				concat_align_command = "perl " + concatAlignPAth + "/ConcateAlignments.pl %s %s %s NO NA NA" % \
 									   (indexIts12FileName, outputFileName, OutDir + "/concat-report.txt")
 				os.system(concat_align_command)
 				return 'sep_ready'
@@ -651,10 +802,10 @@ def pickFromFile_py(context,count,fileName,outDir):
 
 	logger.debug(seq_record)
 
-	if seq_record is 0:
-		logger.debug("seq_record is 0")
-	else:
-		logger.debug("seq_record %s" %seq_record.description)
+	#if seq_record is 0:
+	#	logger.debug("seq_record is 0")
+	#else:
+	#	logger.debug("seq_record %s" %seq_record.description)
 	return seq_record
 
 
@@ -697,6 +848,7 @@ def pickOneSeqPerSpeciesMSA(context, inputFile, outDir, outputFile, scriptsDir, 
 				if context.its_accession_vs_type[seq_accession] is 'its2':
 					SeqIO.write(seq, speciesDir + "/ITS2_only", "fasta")
 					ITS2count+=1
+
 
 		#Check the flow was correct and there is only one seq per type
 		if (ITS1count > 1 or ITS2count > 1 or combinedCount > 1):
@@ -764,6 +916,7 @@ def pickOneITSTypePerSpeciesFasta_py(context,inputFile, outDir, outputFile, scri
 
 	species_counter = 0
 	chosenSequences = []
+	context.its_taxa_vs_counts=dict()
 	f_log.write("Processing $species\n")
 	for seq_file in speciesFiles:
 		if('.fasta' in seq_file):
@@ -789,11 +942,18 @@ def pickOneITSTypePerSpeciesFasta_py(context,inputFile, outDir, outputFile, scri
 	#calc longest in case of no blast results:
 	calc_longest_accordingToType(context)
 
+	logger.debug("LINE836: ")
+	logger.debug(context.its_taxa_vs_counts)
+
 	#For each species select representative seq:
 	for speciesDir in context.its_taxa_vs_counts:
+		if ('its_after_SeqGuidanceRemoval' in speciesDir):
+			logger.debug(speciesDir)
+
 		ITS1count = context.its_taxa_vs_counts[speciesDir][0]
 		ITS2count = context.its_taxa_vs_counts[speciesDir][1]
 		combinedCount = context.its_taxa_vs_counts[speciesDir][2]
+
 		if (combinedCount > 0):
 			chosen_seq = pickFromFile_py(context,combinedCount, speciesDir + "/combined", speciesDir)
 			if chosen_seq is not 0:
@@ -821,7 +981,6 @@ def pickOneITSTypePerSpeciesFasta_py(context,inputFile, outDir, outputFile, scri
 					SeqIO.write(chosen_seq, total_ITS2_f, "fasta")
 					total_its2_cnt += 1
 
-
 	f_log.write("A total of %d sequences were chosen\n" %len(chosenSequences))
 	f_log.write("Number of species =%d\n" %species_counter)
 	f_log.write("Total seq count according to ITS type: combined=%d, its1=%d, its2=%d\n" %(total_combined_cnt,total_its1_cnt,total_its2_cnt))
@@ -832,6 +991,7 @@ def pickOneITSTypePerSpeciesFasta_py(context,inputFile, outDir, outputFile, scri
 	total_combined_f.close()
 	total_ITS1_f.close()
 	total_ITS2_f.close()
+
 
 	return (total_its1_cnt,total_its2_cnt,total_combined_cnt)
 
@@ -877,9 +1037,16 @@ def splitITS_py(taxId, context,input, its1Output, its2Output, combinedOutput):
 	#Find accession numbers of ITS seqs
 
 	#seq_count = context.taxon_Id_df.index(taxId)
-	idx_list=[]
+	#idx_list=[]
 	all_idx_taxId = context.taxon_Id_df[context.taxon_Id_df == taxId]
 	accession_indxes = all_idx_taxId.index.tolist()
+
+	#logger.debug("accession_indxes")
+	#logger.debug(accession_indxes)
+	#logger.debug("context.its_accession_ids")
+	#logger.debug(context.its_accession_ids)
+
+	#context.its_accession_vs_type=dict()
 
 	#while seq_count < len(context.Accession_df):
 	for seq_count in accession_indxes:
@@ -922,13 +1089,282 @@ def splitITS_py(taxId, context,input, its1Output, its2Output, combinedOutput):
 
 	return (ITS1count, ITS2count, combinedCount)
 
+#-------------------------------------------------------------------------------------------------------
+def create_its1(ITS_Cluster_dir,combined_file,its_1_origin,its_1_dest,BC_L, BC_S, log_f):
+
+	all_its_seqs_file = ITS_Cluster_dir + '/ITSclst-allseq-its-only.fasta'
+	fasta_Its1_comb = ITS_Cluster_dir + '/combined_its1_forBC.fasta'
+	BC_out_ITS1_comb_file = ITS_Cluster_dir + '/Comb_ITS1_BCOutput.txt'
+	its1_taxa_list = combine_2_fasta(its_1_origin, combined_file, fasta_Its1_comb, log_f)
+	log_f.write('ITS1 taxa list (accessions): length %d\n' % len(its1_taxa_list))
+	log_f.write('ITS1 taxa:\n')
+	for item in its1_taxa_list:
+		log_f.write('%s\n' % item)
+	# Perform BC - ITS1/ITS2 with Combined: BlustClust One Sided 0.4 60:
+	#									Nuc		  One-Sided   	SeqId Pars Multiple
+	BC_cmd = 'blastclust -i %s -o %s -p F -L %f -b F -S %d -e F' % (
+		fasta_Its1_comb, BC_out_ITS1_comb_file, BC_L, BC_S)
+	os.system(BC_cmd)
+	taxa_list_ITS1_clst = retrun_taxa_Clst(BC_out_ITS1_comb_file, 1)
+	if 'No Cluster' not in taxa_list_ITS1_clst:
+		ITS1_in_BC_res = set(taxa_list_ITS1_clst) - set(its1_taxa_list)
+		log_f.write('ITS1_in_BC_res:\n')
+		for item in ITS1_in_BC_res:
+			log_f.write(item + '\n')
+	# Remove from ITS1 and ITS2 only taxa that were not included in the largest BC cluster:
+	# Copy from fasta_origin_file to New_file the relevant accessions and the rest write to fasta_origin_file
+	remove_accessions_from_fasta(taxa_list_ITS1_clst, its_1_origin, its_1_dest, all_its_seqs_file)
+
+	return
+
+#-------------------------------------------------------------------------------------------------------
+def create_its2(ITS_Cluster_dir,combined_file,its_2_origin,its_2_dest,BC_L, BC_S, log_f):
+
+	all_its_seqs_file = ITS_Cluster_dir + '/ITSclst-allseq-its-only.fasta'
+	fasta_Its2_comb = ITS_Cluster_dir + '/combined_its2_forBC.fasta'
+	BC_out_ITS2_comb_file = ITS_Cluster_dir + '/Comb_ITS2_BCOutput.txt'
+	its2_taxa_list = combine_2_fasta(its_2_origin, combined_file, fasta_Its2_comb, log_f)
+	log_f.write('ITS2 taxa list (accessions): length %d\n' % len(its2_taxa_list))
+	for item in its2_taxa_list:
+		log_f.write('%s,' % item)
+	# Perform BC - ITS1/ITS2 with Combined: BlustClust One Sided 0.4 60:
+	#									Nuc		  One-Sided   	SeqId Pars Multiple
+	BC_cmd = 'blastclust -i %s -o %s -p F -L %f -b F -S %d -e F' % (
+		fasta_Its2_comb, BC_out_ITS2_comb_file, BC_L, BC_S)
+	os.system(BC_cmd)
+	taxa_list_ITS2_clst = retrun_taxa_Clst(BC_out_ITS2_comb_file, 1)
+	if 'No Cluster' not in taxa_list_ITS2_clst:
+		ITS2_in_BC_res = set(taxa_list_ITS2_clst) - set(its2_taxa_list)
+		log_f.write('ITS2_in_BC_res:\n')
+		for item in ITS2_in_BC_res:
+			log_f.write(item + ',')
+	# Remove from ITS1 and ITS2 only taxa that were not included in the largest BC cluster:
+	# Copy from fasta_origin_file to New_file the relevant accessions and the rest write to fasta_origin_file
+	remove_accessions_from_fasta(taxa_list_ITS2_clst, its_2_origin, its_2_dest, all_its_seqs_file)
+	return
+
+
+#-------------------------------------------------------------------------------------------------------
+def parse_BC_results(BC_out_file):
+
+	cluster_number=0
+	accession_list = []
+	with open(BC_out_file, 'r') as BCres_f:
+		taxa_num = 0
+		total_taxa_count = 0
+		for line in BCres_f:
+			cluster_number += 1
+			data_spl = line.strip().split(" ")
+			for item in data_spl:
+				item_spl = item.split('|')
+				accession_list.append(item_spl[1])
+			if cluster_number == 1:
+				taxa_num = len(accession_list)
+
+	return taxa_num,accession_list
+
+#-------------------------------------------------------------------------------------------------------
+def Filter_1st_Cluster_BC_combined(context,input_fasta,out_dir,BC_L,BC_S,log_f,TotalTaxaNum):
+	#In case there is no combined file we need to run BC on its1 and/or its2
+	#only then we'll perform the combination of the 2
+
+	#Save original
+	its1fasta = out_dir+"/ITS1_only.fasta"
+	its2fasta = out_dir+"/ITS2_only.fasta"
+	its1fasta_origin = out_dir+"/ITS1_only.fasta_original"
+	its2fasta_origin = out_dir+"/ITS2_only.fasta_original"
+	its1fasta_copy = out_dir+"/ITS1_only.fasta_copy"
+	its2fasta_copy = out_dir+"/ITS2_only.fasta_copy"
+	itscombfasta = out_dir+"/combined.fasta"
+	itscombfasta_origin = out_dir+"/combined_origin.fasta"
+	shutil.copyfile(itscombfasta,itscombfasta_origin)
+	shutil.copyfile(its1fasta,its1fasta_copy)
+	shutil.copyfile(its2fasta,its2fasta_copy)
+	shutil.copyfile(its1fasta,its1fasta_origin)
+	shutil.copyfile(its2fasta,its2fasta_origin)
+	main_its_dir = out_dir
+
+	BC_out_file = out_dir + '/Combined_BCOutput.txt'
+	#									Nuc		  BOTH   	SeqId Pars Multiple
+	BC_cmd = 'blastclust -i %s -o %s -p F -L %f -b T -S %d -e F' %(itscombfasta,BC_out_file,BC_L,BC_S)
+	os.system(BC_cmd)
+	logger.debug("Perform BlastClust on Combined file:")
+	logger.debug(BC_cmd)
+	cluster_number=0
+	Cluster_data_spcNum=dict()	#Number of taxa in each cluster
+	Cluster_data_AccList=dict()	#Accessions list for each cluster
+	Cluster_TaxaCount_dict=dict()	#Accessions list for each cluster
+	ITS_cluster_counter = 0
+
+	# Check if there's any data, otherwise need to handle the ITS1/ITS2 separately:
+	# -----------------------------------------------------------------------------
+	if os.stat(itscombfasta).st_size == 0:
+		logger.debug("No combined data found")
+		ITS_cluster_counter = 1
+		#Find ITS1 and ITS2 sequences for cluster number 1:
+		logger.debug("\n No Combined data, construct all its1/2 clusters:\n")
+		out_dir = main_its_dir
+		context.its_cluster_list.append(out_dir)
+		#shutil.copyfile(input_fasta, out_dir + '/ITSclst-allseq-its-only.fasta')
+		# Filter both ITS1 and ITS2 usign Blast Clust:
+		BC_out_its1_file =  out_dir + '/ITS1_BCOutput.txt'
+		BC_out_its2_file =  out_dir + '/ITS2_BCOutput.txt'
+		os.system('blastclust -i %s -o %s -p F -L %f -b T -S %d -e F' % (its1fasta_origin, BC_out_its1_file, BC_L, BC_S))
+		os.system('blastclust -i %s -o %s -p F -L %f -b T -S %d -e F' % (its2fasta_origin, BC_out_its2_file, BC_L, BC_S))
+		its1_taxa_num, its1_accession_list = parse_BC_results(BC_out_its1_file)
+		its2_taxa_num, its2_accession_list = parse_BC_results(BC_out_its2_file)
+		logger.debug("\n its1_taxa_num: %s\n" %str(its1_taxa_num))
+		logger.debug("\n its2_taxa_num: %s\n" %str(its2_taxa_num))
+		fasta_its1_New_file = out_dir + '/ITS1_new_temp.fasta'
+		fasta_its2_New_file = out_dir + '/ITS2_new_temp.fasta'
+		remove_accessions_from_fasta(its1_accession_list, its1fasta_origin, out_dir + '/ITSclst-allseq-its-only.fasta', out_dir + '/ITSclst-allseq-its-only.fasta')
+		remove_accessions_from_fasta(its2_accession_list, its2fasta_origin, fasta_its2_New_file, out_dir + '/ITSclst-allseq-its-only.fasta')
+
+	# In case combined file has data this is the code to handle it:
+	# -------------------------------------------------------------
+	else:
+		with open(BC_out_file,'r') as BCres_f:
+			taxa_count_cluster_ONE = 0
+			total_taxa_count=0
+			for line in BCres_f:
+				accession_list=[]
+				cluster_number += 1
+				data_spl = line.strip().split(" ")
+				Cluster_data_spcNum[cluster_number] = len(data_spl)
+				for item in data_spl:
+					item_spl = item.split('|')
+					accession_list.append(item_spl[1])
+				if cluster_number == 1:
+						taxa_count_cluster_ONE = len(accession_list)
+				total_taxa_count+=len(accession_list)
+				Cluster_TaxaCount_dict[cluster_number]=len(accession_list)
+				#Check if cluster has at least 5 taxa in it:
+				if len(accession_list) >= 5:
+					Cluster_data_AccList[cluster_number]=accession_list
+					ITS_cluster_counter +=1
+
+		#Copy only accessions in first 5 clusters
+		log_f.write("Clusters Data:")
+		for cluster_i in range(1,ITS_cluster_counter):
+			log_f.write(str(len(Cluster_data_AccList[cluster_i])))
+			for item in Cluster_data_AccList[cluster_i]:
+				log_f.write(str(item) + ',')
+			log_f.write('\nCluster#%d: %d taxa, %f%%\n' %(cluster_i,Cluster_TaxaCount_dict[cluster_i],(Cluster_TaxaCount_dict[cluster_i]/taxa_count_cluster_ONE)*100))
+			log_f.write('\n')
+
+
+		#Find ITS1 and ITS2 sequences for cluster number 1:
+		log_f.write("\n Construct all its clusters:\n")
+		for cluster_num in Cluster_data_AccList.keys():
+			aaccession_list = Cluster_data_AccList[cluster_num]
+			if cluster_num == 1:
+				out_dir = main_its_dir
+			else:
+				out_dir = main_its_dir + '/ITS_cluster_'+str(cluster_num)
+				create_dir_if_not_exists(out_dir)
+				context.its_cluster_list.append(out_dir)
+			log_f.write("\n ITS cluster %d: combined accession list:\n" %cluster_num)
+			for item in aaccession_list:
+				log_f.write("%s\n" %item)
+			origin_combined_file = main_its_dir + "/combined_origin.fasta"
+			dest_combined_file = out_dir + "/combined.fasta"
+			seqs = list(SeqIO.parse(origin_combined_file, "fasta"))
+			fasta_filtered_f = open(dest_combined_file, 'w')
+			all_its_seqs_file = open(out_dir + '/ITSclst-allseq-its-only.fasta','w')
+			for seq in seqs:
+				gi_accession = getPropertyFromFastaSeqHeader(seq.description, "gi")
+				for accession_id in aaccession_list:
+					if accession_id in gi_accession:
+						SeqIO.write(seq, fasta_filtered_f, "fasta")
+						SeqIO.write(seq, all_its_seqs_file, "fasta")
+			all_its_seqs_file.close()
+			its_1_origin = main_its_dir+"/ITS1_only.fasta_original"
+			its_2_origin = main_its_dir+"/ITS2_only.fasta_original"
+			New_its1_file = out_dir + "/ITS1_only.fasta"
+			New_its2_file = out_dir + "/ITS2_only.fasta"
+			if os.stat(its1fasta_origin).st_size != 0:
+				create_its1(out_dir,dest_combined_file,its_1_origin,New_its1_file,BC_L, BC_S, log_f)
+			else:
+				with open(New_its1_file, 'w') as its1_new_f:
+					its1_new_f.close()
+			if os.stat(its2fasta_origin).st_size != 0:
+				create_its2(out_dir,dest_combined_file,its_2_origin,New_its2_file,BC_L, BC_S, log_f)
+			else:
+				with open(New_its2_file, 'w') as its2_new_f:
+					its2_new_f.close()
+
+	#return its_clusters_list
+	return
+
+#-------------------------------------------------------------------------------------------------------
+def retrun_taxa_Clst(BC_result_file,cluster_num):
+
+	cluster_number = 0
+	with open(BC_result_file, 'r') as BCres_f:
+		for line in BCres_f:
+			accession_list = []
+			cluster_number += 1
+			if cluster_num == cluster_number:	#The cluster number we would like to save
+				data_spl = line.strip().split(" ")
+				for item in data_spl:
+					item_spl = item.split('|')
+					accession_list.append(item_spl[1])
+				return accession_list
+	return ('No Cluster %d' %cluster_num)
+
+#-------------------------------------------------------------------------------------------------------
+def remove_accessions_from_fasta(aaccession_list,fasta_origin_file,fasta_New_file,all_its_seqs_file):
+	#Copy from fasta_origin_file to New_file the relevant accessions and the rest write to fasta_origin_file
+
+	temp_file = fasta_origin_file+'_temp'
+	shutil.copyfile(fasta_origin_file,temp_file)
+	seqs = list(SeqIO.parse(temp_file, "fasta"))
+	fasta_new_f = open(fasta_New_file, 'w')
+	# This file will keep the accessions left:
+	origin_fasta_f = open(fasta_origin_file, 'w')
+	for seq in seqs:
+		gi_accession = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		if gi_accession in aaccession_list:
+			SeqIO.write(seq, fasta_new_f, "fasta")
+		else:
+			SeqIO.write(seq, origin_fasta_f, "fasta")
+
+	origin_fasta_f.close()
+	fasta_new_f.close()
+	#remove the temp file and concat the its to the all file:
+	os.system("cat %s >> %s" % (fasta_New_file, all_its_seqs_file))
+	os.remove(temp_file)
+
+# -------------------------------------------------------------------------------------------------------
+def copy_cluster_accessions(aaccession_list, origin_fasta_file, dest_fasta_file):
+
+	seqs = list(SeqIO.parse(origin_fasta_file, "fasta"))
+	fasta_filtered_f = open(dest_fasta_file, 'w')
+	for seq in seqs:
+		gi_accession = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		for accession_id in aaccession_list:
+			if accession_id in gi_accession:
+				SeqIO.write(seq, fasta_filtered_f, "fasta")
+
+#-------------------------------------------------------------------------------------------------------
+def combine_2_fasta(fasta1,fasta2,fasta_1_2,log_f):
+
+	os.system("cat %s > %s" % (fasta1, fasta_1_2))
+	os.system("cat %s >> %s" % (fasta2, fasta_1_2))
+
+	seqs_list = list(SeqIO.parse(fasta_1_2, "fasta"))
+	return_taxa_list=[]
+	for seq in seqs_list:
+		return_taxa_list.append(seq.description.split('|')[1])
+	log_f.write("Combine: %s and %s, taxaNum = %d" %(fasta1,fasta2,len(return_taxa_list)))
+	return return_taxa_list
 
 #-------------------------------------------------------------------------------------------------------
 #
 #							MAIN  - ITS flow (converted from perl)
 #
 #-------------------------------------------------------------------------------------------------------
-def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidanceFlag, msa_software):
+def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidanceFlag, msa_software,Clst_Dir):
 
 	f_mainITS_log = open(OutDir+'/MainITS.log','w')
 	pickFromFastalog = OutDir+"/pickOneSeqFromFasta.log"
@@ -936,7 +1372,134 @@ def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidance
 	its1fasta = OutDir+"/ITS1_only.fasta"
 	its2fasta = OutDir+"/ITS2_only.fasta"
 	itscombfasta = OutDir+"/combined.fasta"
+	#initialize ITS accession ids list:
+	context.its_accession_ids = []
+	create_dir_if_not_exists(OutDir)
 
+	#Create list of Accessions of ITS:
+	logger.debug("Create list of AccessionId for all ITS sequences - start")
+	records_all = SeqIO.parse(fasta, 'fasta')
+	for seq in records_all:
+		accession_id = getPropertyFromFastaSeqHeader(seq.description, "gi")
+		context.its_accession_ids.append(accession_id)
+	logger.debug("Number of AccessionId for all ITS sequences - %d" %len(context.its_accession_ids))
+	logger.debug(context.its_accession_ids)
+
+	f_mainITS_log.write("Filtering %s - each species will have at most one ITS seq of each type (ITS1/ITS2/combined) \n" %fasta)
+	#--> Need to convert to python -> removed gbIndex since we use Database instead
+	(ITS1count, ITS2count, combinedCount) = pickOneITSTypePerSpeciesFasta_py(context,fasta, OutDir, OutDir+"/oneITSTypePerSpecies.fasta", scriptsDir, pickFromFastalog)
+	f_mainITS_log.write("ITS1count=%d, ITS2count=%d, combinedCount =%d, )" % (ITS1count, ITS2count, combinedCount))
+	f_mainITS_log.write("Completed - pickOneITSTypePerSpeciesFasta_py\n")
+
+	append = 1
+	if combinedCount > 0 :
+		append = 0   # merge
+	f_mainITS_log.write("append flag = %d (if 0-> merge,if 1-> append)" %append)
+
+
+	# Add BlastClust to filter small clusters and taxa outlyers  - its1fasta, its2fasta , itscombfasta
+	#its_clusters_list=[]
+	if Clst_Dir == "1" and combinedCount > 0:
+		BC_L = 0.3
+		BC_S = 60
+		#Number of taxa in Genebank
+		TotalTaxaNum = len(context.species_list_names)
+		Filter_1st_Cluster_BC_combined(context,fasta,OutDir, BC_L, BC_S,f_mainITS_log,TotalTaxaNum)
+		logger.debug("ITS Clusters:\n")
+		for its_clust in context.its_cluster_list:
+			logger.debug("%s\n" %its_clust)
+
+		logger.debug("Completed first ITS cluster at: %s" % OutDir)
+		if OutDir not in context.its_cluster_list:
+			context.its_cluster_list.append(OutDir)
+		with open(OutDir + '/ITS_CLUSTER', 'w') as f_flag_its:
+			f_flag_its.close()
+	else:
+		if Clst_Dir == "1":
+			BC_L = 0.3
+			BC_S = 60
+			# Number of taxa in Genebank
+			TotalTaxaNum = len(context.species_list_names)
+			Filter_1st_Cluster_BC_combined(context,fasta, OutDir, BC_L, BC_S, f_mainITS_log, TotalTaxaNum)
+			logger.debug("ITS Clusters:\n")
+			for its_clust in context.its_cluster_list:
+				logger.debug("%s\n" % its_clust)
+
+			logger.debug("Completed first ITS cluster at: %s" % OutDir)
+			if OutDir not in context.its_cluster_list:
+				context.its_cluster_list.append(OutDir)
+			with open(OutDir + '/ITS_CLUSTER', 'w') as f_flag_its:
+				f_flag_its.close()
+
+	if(ITS1count > 0 or ITS2count > 0 or combinedCount > 0):
+
+		# Do MSA for the ITS seqs
+		f_mainITS_log.write("Found ITS seqs - starting MSA for ITS\n")
+
+
+		if (msa_software == 'ClustalOmega'):
+			f_mainITS_log.write("MSA software -> ClustalOmega\n")
+			MSAfileName = ITS_CLUSTALO_py(OutDir, ITS1count, ITS2count, combinedCount,its1fasta, its2fasta, itscombfasta,scriptsDir)
+		else:
+			f_mainITS_log.write("MSA software -> MAFFT\n")
+			MSAfileName = ITS_MSA_py(OutDir, ITS1count, ITS2count, combinedCount,its1fasta, its2fasta, itscombfasta,scriptsDir)
+
+		if MSAfileName is 'sep_ready':
+			logger.debug("ITS from ITS1 and ITS2, no combined data")
+			shutil.copyfile(OutDir + '/SEP_ITS1+ITS2.msa', OutDir+"/oneSeqPerSpecies.msa")
+			return
+		f_mainITS_log.write("After MSA - selecting a single ITS seq per species. MSA file: %s\n" % MSAfileName)
+		pickOneSeqPerSpeciesMSA(context,MSAfileName, OutDir, OutDir+"/oneSeqPerSpecies.msa", scriptsDir, pickFromMSAlog,append)
+
+		logger.debug(os.path.exists(OutDir + "/combined+sep.msa"))
+		if os.path.exists(OutDir + "/combined+sep.msa"):
+			combined_sep_f = open(OutDir + '/combined+sep.msa', 'r')
+			if is_empty_file(combined_sep_f) != 0:
+				sep_fasta_f = ("%s/SEP_ITS1+ITS2.fasta" %OutDir)
+				logger.debug("About to count number of seqs in %s\n" %sep_fasta_f)
+
+				logger.debug("GUIDANCE Flag is set to: %s\n" %guidanceFlag)
+
+				if (guidanceFlag == "GUIDANCE"):
+					#Check type of guidance: col, rows or both:
+					if(context.UserFlags_dict['Guidance_RowCol'] == 'Both'):
+						logger.debug("GUIDANCE is running on ITS - Both\n")
+						new_guidance_for_its_Both(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
+					else:
+						#guidance_for_its(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
+						new_guidance_for_its(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
+				elif (guidanceFlag == "Trimal"):
+					Trimal_cf = context.UserFlags_dict['Trimal_CutOff']
+					runTrimal(OutDir + "/combined+sep.msa", Trimal_cf)
+					logger.info("Files after Trimal at: %s" % OutDir + "/combined+sep.msa")
+				else:
+					logger.debug("Guidance Flag is set to False !!!")
+			elif os.path.exists(OutDir + "/combined.msa"):
+				if (guidanceFlag == "GUIDANCE"):
+					logger.debug("GUIDANCE is running on ITS\n")
+					#guidance_for_its(context, OutDir + "/combined.fasta", 'None', OutDir)
+					new_guidance_for_its(context, OutDir + "/combined.fasta", 'None', OutDir)
+				elif (guidanceFlag == "Trimal"):
+					Trimal_cf = context.UserFlags_dict['Trimal_CutOff']
+					runTrimal(OutDir + "/combined.msa", Trimal_cf)
+					logger.info("Files after Trimal at: %s" % OutDir + "/combined.msa")
+				else:
+					#TO DO - execute GUIDACE even in this case - it should be standatd GUIDANCE execution and not special like the above
+					logger.debug("NOT Calling GUIDANCE since combined file doesn't exists\n")
+
+
+	return
+#--------------------------------------------------------------------------------------------------------------------
+def main_ITS_2nd_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidanceFlag, msa_software):
+
+	f_mainITS_log = open(OutDir+'/MainITS.log','w')
+	pickFromFastalog = OutDir+"/pickOneSeqFromFasta.log"
+	pickFromMSAlog = OutDir+"/pickOneSeqFromMSA.log"
+	its1fasta = OutDir+"/ITS1_only.fasta"
+	its2fasta = OutDir+"/ITS2_only.fasta"
+	itscombfasta = OutDir+"/combined.fasta"
+	#initialize ITS accession ids list:
+	context.its_accession_ids = []
 	create_dir_if_not_exists(OutDir)
 
 	#Create list of Accessions of ITS:
@@ -989,8 +1552,9 @@ def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidance
 				logger.debug("GUIDANCE Flag is set to: %s\n" %guidanceFlag)
 
 				if (guidanceFlag == "GUIDANCE"):
-					logger.debug("GUIDANCE is running on ITS\n")
-					guidance_for_its(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
+					#Check type of guidance: col, rows or both:
+					#guidance_for_its(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
+					new_guidance_for_its_Col(context,OutDir + "/combined.fasta", sep_fasta_f, OutDir)
 				elif (guidanceFlag == "Trimal"):
 					Trimal_cf = context.UserFlags_dict['Trimal_CutOff']
 					runTrimal(OutDir + "/combined+sep.msa", Trimal_cf)
@@ -1000,7 +1564,8 @@ def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidance
 			elif os.path.exists(OutDir + "/combined.msa"):
 				if (guidanceFlag == "GUIDANCE"):
 					logger.debug("GUIDANCE is running on ITS\n")
-					guidance_for_its(context, OutDir + "/combined.fasta", 'None', OutDir)
+					#guidance_for_its(context, OutDir + "/combined.fasta", 'None', OutDir)
+					new_guidance_for_its(context, OutDir + "/combined.fasta", 'None', OutDir)
 				elif (guidanceFlag == "Trimal"):
 					Trimal_cf = context.UserFlags_dict['Trimal_CutOff']
 					runTrimal(OutDir + "/combined.msa", Trimal_cf)
@@ -1010,4 +1575,5 @@ def main_ITS_py(context,OutDir, fasta, gene_db, scriptsDir, configFile, guidance
 					logger.debug("NOT Calling GUIDANCE since combined file doesn't exists\n")
 
 	return
+
 

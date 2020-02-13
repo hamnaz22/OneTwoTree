@@ -382,8 +382,10 @@ def get_all_species_and_Accepted(context,db_filename,high_ranked_list,Names_Afte
 				fiction_taxId = acc_names_acc_taxid_dict[acc_name]
 			else:
 				fiction_taxId = int('999'+str(random.randint(0,10))+str(random.randint(0,10))+str(random.randint(0,10))+str(random.randint(0,10))+str(random.randint(0,10))+str(random.randint(0,10))+'999')
-				acc_names_acc_taxid_dict[acc_name]=fiction_taxId
-			logger.debug("Create fictional Accepted TaxId for plant list without a scientific NCBI name: %s, %d" %(acc_name,fiction_taxId))
+				acc_names_acc_taxid_dict[acc_name]=str(fiction_taxId)
+				#Check if this will solev the error when Matched PLT - (example : Lithospermum)
+				context.species_names_by_tax_id[str(fiction_taxId)] = acc_name
+			logger.debug("Create fictional Accepted TaxId for plant list without a scientific NCBI name: %s, %s" %(acc_name,fiction_taxId))
 		else:
 			acc_names_acc_taxid_dict[acc_name] = name_vs_ncbiScien_TaxId_dict[acc_name]
 
@@ -514,7 +516,7 @@ def break_ncbi_line(line): #return Spc_Rank,Spc_TaxID,Spc_ParentTaxID,Spc_Name,S
 	Spc_Rank = str(line[0])
 	Spc_TaxID = str(line[1])
 	Spc_ParentTaxID = str(line[2])
-	Spc_Name = line[3].replace(",","").replace("'","").replace("-"," ")
+	Spc_Name = line[3].replace(",","").replace("'","").replace("-"," ").replace("[","").replace("]","")
 	Spc_Type = str(line[5])
 	return Spc_Rank,Spc_TaxID,Spc_ParentTaxID,Spc_Name,Spc_Type
 
@@ -702,7 +704,12 @@ def check_cluster_BlastAll(cluster_num,seq_id,working_dir):
 	# Read blast all file into a data-structure:
 	blast_all_DataStruct = pd.read_csv(path_blast_allVall, sep='\t',names = blast_header)
 	# filter only the relevant results for selected seq_id:
-	filtered = blast_all_DataStruct[(blast_all_DataStruct['queryId'] == seq_id)]
+	#filtered = blast_all_DataStruct[(blast_all_DataStruct['queryId'] == seq_id)]
+	if 'seqid' in seq_id:
+		seq_id_filt = seq_id.split('seqid|')[1]
+	else:
+		seq_id_filt=seq_id
+	filtered = blast_all_DataStruct[(blast_all_DataStruct['queryId'] == seq_id_filt)]
 	if not filtered.empty:
 		# Drop duplicates of subjectId -> take only the first data (the high score):
 		No_duple = filtered.drop_duplicates(subset=['subjectId'], keep='first')
@@ -867,6 +874,12 @@ def Check_and_Add_LargeTaxIds(context):
 				if os.path.exists(context.working_dir + "/" + str(i_clust) + '/ITS_CLUSTER'):
 					logger.debug("ITS cluster, skip Large species (done separately)")
 					continue
+				if os.path.exists(context.working_dir + "/" + str(i_clust) + '/ITS_CLUSTER_2'):
+					logger.debug("ITS2 cluster, skip Large species (done separately)")
+					continue
+				if os.path.exists(context.working_dir + "/" + str(i_clust) + '/ITS_CLUSTER_3'):
+					logger.debug("ITS3 cluster, skip Large species (done separately)")
+					continue
 				#for i_clust in num_of_clusters:
 				path_of_selected_seq = context.working_dir + "/" + str(i_clust) + "/seq-to-blast"
 				with open(path_of_selected_seq,'r') as f_seq:
@@ -880,7 +893,7 @@ def Check_and_Add_LargeTaxIds(context):
 					gi_num = first_line_seq[first_line_seq.find(start_gi)+len(start_gi):first_line_seq.rfind(end_gi)]
 					logger.debug("Selected seq: gi %s, seqid %s" %(gi_num,seq_id))
 
-				blast_results = context.working_dir + "/LargeSpecies/seq_vs_LargeSeq_" + str(i_clust) + ".blastn"
+				blast_results = context.working_dir + "/LargeSpecies/" +str(LargeTaxId) + "_seq_vs_LargeSeq_" + str(i_clust) + ".blastn"
 				blast_cmd = "blastall -p blastn -d " + file_of_LargeSeqs + " -i " + path_of_selected_seq + " -v 150000 -b 150000 -e 0.1 -m 8 > " + blast_results   # -m 9 will give a header to the output file
 				logger.debug("Running blast cmd: %s" % blast_cmd)
 				os.system(blast_cmd)
@@ -1104,7 +1117,7 @@ def extract_names_from_rows(context,rows_db,db_name):
 		Rank=line[0]
 		TaxID=line[1]
 		ParentTaxID=line[2]
-		Name=line[3].replace(",","").replace("'","").replace("-"," ")
+		Name=line[3].replace(",","").replace("'","").replace("-"," ").replace("[","").replace("]","")
 		Other=line[4]
 		Type=line[5]
 		#In case of Name match/Resolution, split scientific and synonyms:
@@ -1152,7 +1165,7 @@ def extract_names_from_rows_debug(context,rows_db,db_name):
 		Rank=line[0]
 		TaxID=line[1]
 		ParentTaxID=line[2]
-		Name=line[3].replace(",","").replace("'","")
+		Name=line[3].replace(",","").replace("'","").replace("[","").replace("]","")
 		Other=line[4]
 		Type=line[5]
 		#In case of Name match/Resolution, split scientific and synonyms:

@@ -188,8 +188,8 @@ def return_seq_desc(seq,f_log):
 		gene_concat = '-'
 	#isol_prod_mol_note = isolate_name + '|' + product_name+ '|' + mol_type+ '|' + note_name
 	#gi = seq.annotations["accessions"][0] #accessions
-	desciption_str = seq.description.replace("'","").replace('"','').replace(',','')
-	organism = organism.replace("'","").replace('"','').replace(',',' ')
+	desciption_str = seq.description.replace("'","").replace('"','').replace(',','').replace("[", "").replace("]", "")
+	organism = organism.replace("'","").replace('"','').replace(',',' ').replace("[", "").replace("]", "")
 	seq_desc = ">gi|%s|taxonid|%s|organism|%s|seqid|%s|description|%s" %(seq.id, taxon_id,organism,seq.id,
 																		 desciption_str)
 	return seq_desc,taxon_id,seq.id,organism,desciption_str,gene_concat,spec_voucher,isolate_name,product_name,mol_type,\

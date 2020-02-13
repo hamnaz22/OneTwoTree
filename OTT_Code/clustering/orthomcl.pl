@@ -17,10 +17,11 @@ if ( @ARGV < 9 ) {
 	(8) config .ini file
 	(9) initial filter of blast results - default is 0.5
 	(10) orthomcl bin directory
+	(11) input taxa num - for filtering clusters
 ";
 }
 
-my ($fastaAllSequences, $tablesNamesSuffix, $percentMatchCutoff, $inflationParam, $scriptsDir, $gbFile, $outDir, $configFile, $filterBlastRatio, $orthomclBinDir) = @ARGV;    #default: $percentMatchCutoff = 50, $inflationParam = 1.5
+my ($fastaAllSequences, $tablesNamesSuffix, $percentMatchCutoff, $inflationParam, $scriptsDir, $gbFile, $outDir, $configFile, $filterBlastRatio, $orthomclBinDir, $inputTaxaNum) = @ARGV;    #default: $percentMatchCutoff = 50, $inflationParam = 1.5
 my (@seqsByOrganismFiles, $taxonCode, $numOfSequnces, $genusName);
 
 # Create a config
@@ -91,7 +92,7 @@ if( $empty_input eq "yes"){
 	my $onlyDesc = $outDir."_onlyDesc";
 	my $seqs = $outDir."_seqs";
 
-	system "perl -w $scriptsDir/getSequencesFromClusters.pl $outDir/groups.txt $seqs $fastaAllSequences"; #get the sequences
+	system "perl -w $scriptsDir/getSequencesFromClusters.pl $outDir/groups.txt $seqs $fastaAllSequences $inputTaxaNum"; #get the sequences
 
 	system "perl -w $scriptsDir/getOnlyDesc.pl $seqs $onlyDesc"; #get descriptions of each cluster
 
@@ -115,7 +116,7 @@ if( $empty_input eq "yes"){
 	my $onlyDesc = $outDir."_onlyDesc";
 	my $seqs = $outDir."_seqs";
 
-	system "perl -w $scriptsDir/getSequencesFromClusters.pl $outDir/groups.txt $seqs $fastaAllSequences"; #get the sequences
+	system "perl -w $scriptsDir/getSequencesFromClusters.pl $outDir/groups.txt $seqs $fastaAllSequences $inputTaxaNum"; #get the sequences
 
 	system "perl -w $scriptsDir/getOnlyDesc.pl $seqs $onlyDesc"; #get descriptions of each cluster
 
@@ -134,7 +135,7 @@ sub step4 {
 	open( CONFIG4, ">$outDir/config_step4" ) or die "can't open file $outDir/config_step4";
 
 	print CONFIG4 "dbVendor=mysql
-dbConnectString=dbi:mysql:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
+dbConnectString=dbi:mysql:mysql_local_infile=1:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
 dbLogin=". $mysqlUserName. "
 dbPassword=" . $mysqlPassword ."
 similarSequencesTable=SimilarSequences" . $tablesNamesSuffix . "
@@ -204,7 +205,8 @@ sub step7 {
 sub filterBlastOutput{
     print "Filtering short BLAST results\n";
     # Preprocessing the blast results in order to filter sequences that are not covered by a certain threshold in the blast results
-    system "python $scriptsDir/filterBlastResultsByLength.py -i $outDir/blast_all-v-all_total.blastn -f $outDir/goodProteins.fasta -o $outDir/blast_all-v-all_output.blastn -fbr $filterBlastRatio > $outDir/filterblast.out 2>&1" ;
+    #system "python $scriptsDir/filterBlastResultsByLength.py -i $outDir/blast_all-v-all_total.blastn -f $outDir/goodProteins.fasta -o $outDir/blast_all-v-all_output.blastn -fbr $filterBlastRatio > $outDir/filterblast.out 2>&1" ;
+    system "python $scriptsDir/filterBlastResultsByLength.py -i $outDir/blast_all-v-all_total.blastn -f $outDir/goodProteins.fasta -o $outDir/blast_all-v-all_output.blastn -fbr $filterBlastRatio" ;
 	print("python $scriptsDir/filterBlastResultsByLength.py -i $outDir/blast_all-v-all_total.blastn -f $outDir/goodProteins.fasta -o $outDir/blast_all-v-all_output.blastn  -fbr $filterBlastRatio> $outDir/filterblast.out 2>&1\n");
 }
 
@@ -223,7 +225,7 @@ sub step9 {
 	open( CONFIG9, ">$outDir/config_step9" ) or die "can't open file $outDir/config_step9";
 
 	print CONFIG9 "dbVendor=mysql
-dbConnectString=dbi:mysql:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
+dbConnectString=dbi:mysql:mysql_local_infile=1:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
 dbLogin=". $mysqlUserName. "
 dbPassword=" . $mysqlPassword ."
 similarSequencesTable=SimilarSequences" . $tablesNamesSuffix;
@@ -241,7 +243,7 @@ sub step10 {
 	open( CONFIG10, ">$outDir/config_step10" ) or die "can't open file $outDir/config_step10";
 
 	print CONFIG10 "dbVendor=mysql
-dbConnectString=dbi:mysql:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
+dbConnectString=dbi:mysql:mysql_local_infile=1:o_" . $tablesNamesSuffix . ":" . $mysqlHostName . "
 dbLogin=". $mysqlUserName. "
 dbPassword=" . $mysqlPassword ."
 similarSequencesTable=SimilarSequences" . $tablesNamesSuffix . "

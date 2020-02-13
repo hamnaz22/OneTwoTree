@@ -5,6 +5,9 @@ from ott_objects_defs.ConcatClusterContext import ConcatClusterContext
 from ott_objects_defs.ploidbCommon import *
 import zlib
 from ott_objects_defs.PathHelper import PathHelper
+from glob import glob
+import os
+import re
 
 __author__ = 'moshe'
 
@@ -24,6 +27,7 @@ class PloiDbContext:
         self.its_min_taxa = 'yes' #Check if ITS include the minimum number of species needed
         self.split_by_feature = False
         self.cluster_contexts = list()
+        self.its_cluster_list = list()
         self.irrelevant_cluster_contexts = list()
         self.full_cluster_contexts = list()
         self.unresolved_species_names = set()
@@ -445,19 +449,55 @@ class PloiDbContext:
 
 
     def add_its_final_cluster(self):
-        cluster_fasta_file = os.path.join(self.cluter_its_dir, "oneSeqPerSpecies.msa")
-        if not os.path.exists(cluster_fasta_file):
-            return None
-        restandarize_description_after_mafft(cluster_fasta_file)
 
-        its_context = self.__add_cluster(cluster_fasta_file)
-        self.its_final_cluster = its_context
-        if its_context is not None:
-            self.its_final_cluster.is_its_cluster = True
+        logger.debug("its_cluster_list:\n")
+        logger.debug(self.its_cluster_list)
+        #cluster_fasta_file = os.path.join(self.cluter_its_dir, "oneSeqPerSpecies.msa")
+        #if not os.path.exists(cluster_fasta_file):
+        #    return None
+        #restandarize_description_after_mafft(cluster_fasta_file)
+
+        #its_context = self.__add_cluster(cluster_fasta_file)
+        #self.its_final_cluster = its_context
+        #if its_context is not None:
+        #   self.its_final_cluster.is_its_cluster = True
             #self.init_its_context_seq_to_blast(its_context, self.cluter_its_dir)
             #fasta_forAlign_its = os.path.join(self.cluter_its_dir, "seqs-no-multiple-accessions.fasta")
             #shutil.copyfile(cluster_fasta_file, fasta_forAlign_its)
-        return its_context
+
+        # check if this run has more than 1 ITS cluster:
+        #dirs_list = os.listdir(self.its_cluster_list)
+        its_context = None
+        for ITS_dir_name in self.its_cluster_list:
+            cluster_fasta_file = ITS_dir_name + '/oneSeqPerSpecies.msa'
+            restandarize_description_after_mafft(cluster_fasta_file)
+            if 'ITS_cluster_' in ITS_dir_name:
+                r = re.compile('ITS_cluster_(\d)')
+                m = r.search(ITS_dir_name)
+                if m:
+                    logger.debug("ITS Num cluster %s" % m.group(1))
+                    ITS_num = str(m.group(1))
+                    logger.info("ITS cluster msa: %s" % cluster_fasta_file)
+                    if os.path.exists(cluster_fasta_file):
+                        logger.info("Adding ITS cluster at: %s" % ITS_dir_name)
+                        restandarize_description_after_mafft(cluster_fasta_file)
+                        its_context = self.__add_cluster(cluster_fasta_file)
+                        logger.info("its_context.cluter_work_dir: %s" % its_context.cluter_work_dir)
+                        # self.its_final_cluster = its_context
+                        with open(its_context.cluter_work_dir +  '/ITS_CLUSTER_' + str(ITS_num), 'w') as f_flag_its:
+                            f_flag_its.close()
+            else:
+                logger.info("Adding ITS main cluster at: %s" % ITS_dir_name)
+                its_context = self.__add_cluster(cluster_fasta_file)
+                logger.info("its_context.cluter_work_dir: %s" % its_context.cluter_work_dir)
+                with open(its_context.cluter_work_dir + '/ITS_CLUSTER', 'w') as f_flag_its:
+                    f_flag_its.close()
+
+        if its_context is not None:
+            self.its_final_cluster = its_context
+            self.its_final_cluster.is_its_cluster = True
+
+        return
 
     # TODO: don't take the first - take according to blast results
     def init_its_context_seq_to_blast(self, its_context, its_clustering_results_dir):

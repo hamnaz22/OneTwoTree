@@ -124,9 +124,9 @@ class ClusterContext(object):
 		logger.debug("Writing sorted %s to %s - as the orginal cluster seqs file" % (
 			self.original_fasta_filename, self.cluter_work_dir))
 		#Check for ITS:
-		if 'oneSeqPerSpecies' in self.original_fasta_filename:
-			with open(self.cluter_work_dir + '/ITS_CLUSTER', 'w') as f_flag_its:
-				f_flag_its.close()
+		#if 'oneSeqPerSpecies' in self.original_fasta_filename:
+		#	with open(self.cluter_work_dir + '/ITS_CLUSTER', 'w') as f_flag_its:
+		#		f_flag_its.close()
 		all_seqs_orig = list(SeqIO.parse(self.original_fasta_filename, "fasta"))
 		self.num_of_cluster_seqs = len(all_seqs_orig)
 
@@ -135,11 +135,40 @@ class ClusterContext(object):
 			SeqIO.write(all_seq_sorted, handle, "fasta")
 
 		#Cast of ITS cluster
+		logger.debug("INSIDE init_cluster\n")
+		logger.debug("self.original_fasta_filename : %s\n" %self.original_fasta_filename)
+		logger.debug("self.cluter_work_dir : %s\n" %self.cluter_work_dir)
+		logger.debug("self.cluster_concat_work_dir : %s\n" %self.cluster_concat_work_dir)
 		if 'oneSeqPerSpecies' not in self.original_fasta_filename:
 			self.init_blast(genus_context)
 			self.init_cluster_id()
 		else:
-			self.cluster_desc = 'ITS'
+			ITS_options = ['ITS_cluster_2','ITS_cluster_3','ITS_cluster_4','ITS_cluster_5']
+			#/groups/itay_mayrose/michaldrori/OTT_TestingDir/ITS_clustering/cluster_its
+			Other_ITS_fount=0
+			for its_dir in ITS_options:
+				if its_dir in self.original_fasta_filename:
+					Other_ITS_fount = 1
+					logger.debug("ITS found more clusters: %s" % (self.cluter_work_dir + '/' + its_dir))
+					# get ITS number from path and add to ID:
+					r = re.compile('ITS_cluster_(\d)')
+					m = r.search(its_dir)
+					if m:
+						logger.debug("ITS Num cluster %s" % m.group(1))
+						ITS_num = str(m.group(1))
+						with open(self.cluter_work_dir + '/ITS_CLUSTER_' + ITS_num, 'w') as f_flag_its:
+							f_flag_its.close()
+						self.init_blast(genus_context)
+						self.cluster_desc = 'ITS' + ITS_num
+						self.cluster_id = 'ITS' + ITS_num
+			if 'cluster_its' in self.original_fasta_filename and Other_ITS_fount == 0:
+				logger.debug("ITS cluster main: %s" % self.cluter_work_dir)
+				with open(self.cluter_work_dir + '/ITS_CLUSTER', 'w') as f_flag_its:
+					f_flag_its.close()
+				self.init_blast(genus_context)
+				self.cluster_desc = 'ITS'
+				self.cluster_id = 'ITS'
+
 		self.init_cluster_type()
 
 
@@ -203,9 +232,9 @@ class ClusterContext(object):
 			else:
 				other_count += 1
 
-			logger.debug(" @@@ SeqID equals to rep_blast_seq_id: %s" %self.rep_blast_seq_id)
+			#logger.debug(" @@@ SeqID equals to rep_blast_seq_id: %s" %self.rep_blast_seq_id)
 			if seq_id == self.cluster_id:
-				logger.debug(" @@@ SeqID equals to rep_blast_seq_id: %s" %self.rep_blast_seq_id)
+				#logger.debug(" @@@ SeqID equals to rep_blast_seq_id: %s" %self.rep_blast_seq_id)
 
 				if "chloroplast" in seq.description:
 					chloroplast_count += 1
@@ -366,6 +395,7 @@ class ClusterContext(object):
 	def get_cluster_length(self, estimated=False):
 		seq_length = self.seq_length
 		if seq_length is None:
+			#If ITS_CLUSTER calc the median length of combined ?????????
 			if os.path.exists(self.all_seqs_aligned_fasta_filename):
 				all_seqs = list(SeqIO.parse(self.all_seqs_aligned_fasta_filename, "fasta"))
 				self.seq_length = len(all_seqs[0])
@@ -383,6 +413,99 @@ class ClusterContext(object):
 						"Couldn't find any file to determine the cluster length. Setting length = 0 for cluster %s (index=%s)" % (
 							self.cluster_id, str(self.index)))
 		return seq_length
+
+
+	def ITS_blast_all(self,ploidb_context):
+		#its_cluster_dir
+		all_seqs_its = ploidb_context.cluter_its_dir + '/oneITSTypePerSpecies.fasta'
+		if not os.path.exists(self.blast_results_filename):
+			exec_blast_all_vs_all(all_seqs_its, self.all_seqs_for_blast_fasta_filename,
+							  self.blast_results_filename, ploidb_context.id)
+		return
+
+	#This ratio is used for cluster selection process:
+	# L_ratio = number of data characters in alignment decided by the total length of the final MSA:
+	def get_cluster_L_ratio(self,ploidb_context):
+		# IF ITS then we need to run blast_all_vs_all:
+		ITS_options = ['ITS_CLUSTER','ITS_CLUSTER_2', 'ITS_CLUSTER_3', 'ITS_CLUSTER_4', 'ITS_CLUSTER_5']
+		for its_op in ITS_options:
+			if os.path.exists(self.cluter_work_dir + '/' + its_op):
+				self.ITS_blast_all(ploidb_context)
+
+		#Since we don't have the msa as this point in the pipeline we need some estimation of the msa quality.
+		#For that we'll use the blast_all_v_all we run for each cluster (for handling the multiple accessions):
+
+		seq_id_length_dict = dict()
+		seq_id_list = []
+		if os.path.exists(self.blast_results_filename):
+			with open(self.blast_results_filename) as f:
+
+				dr = csv.DictReader(f, delimiter='\t',
+									fieldnames=['query_id', 'subject_id', 'pct_identity', 'align_len', 'mismatches',
+												'gap_openings', 'q_start', 'q_end', 's_start', 's_end', 'eval',
+												'bitscore'])
+
+				logger.info("Set L_ratio for msa quality param for cluster selection:")
+				list_pct_identity = []
+				dict_pct_identity = dict()
+				dict_qid_pct_identity = dict()
+				for next_row in dr:
+					qid = next_row['query_id']
+					sid = next_row['subject_id']
+					#Collect sequences length and calc total align_len (for cases where the alignment is cut
+					# into more than one section)
+					if qid == sid:
+						if qid in seq_id_length_dict.keys():
+							seq_id_length_dict[qid] += float(next_row['align_len'])
+						else:
+							seq_id_length_dict[qid] = float(next_row['align_len'])
+						#logger.debug("seq_id_length_dict[qid] = %f" % (seq_id_length_dict[qid]))
+
+			with open(self.blast_results_filename) as f2:
+				dr2 = csv.DictReader(f2, delimiter='\t',
+								fieldnames=['query_id', 'subject_id', 'pct_identity', 'align_len', 'mismatches',
+											'gap_openings', 'q_start', 'q_end', 's_start', 's_end', 'eval',
+											'bitscore'])
+
+				for next_row in dr2:
+					ref_length=0
+					qid = next_row['query_id']
+					sid = next_row['subject_id']
+
+					if qid != sid:
+						qid_sid_pair = qid + '_' + sid
+						if qid not in seq_id_list:
+							seq_id_list.append(qid)
+						ref_length = seq_id_length_dict[qid]
+						# 357/940*0.83 +
+						prec_align = float(next_row['align_len'])/seq_id_length_dict[qid]*float(next_row['pct_identity'])
+						if qid_sid_pair in dict_pct_identity.keys():
+							dict_pct_identity[qid_sid_pair] += prec_align
+						else:
+							dict_pct_identity[qid_sid_pair] = prec_align
+
+
+				for qid in seq_id_list:
+					for key in dict_pct_identity.keys():
+						if qid in key:
+							if qid in dict_qid_pct_identity.keys():
+								dict_qid_pct_identity[qid].append(dict_pct_identity[key])
+							else:
+								dict_qid_pct_identity[qid] = [(dict_pct_identity[key])]
+
+
+				for qid_seq in dict_qid_pct_identity.keys():
+					prsct_ident = sum(dict_qid_pct_identity[qid_seq])/len(dict_qid_pct_identity[qid_seq])
+					logger.debug("prsct_ident of seq id %s is %f\n" % (qid_seq,prsct_ident))
+					list_pct_identity.append(prsct_ident)
+
+			L_ratio = sum(list_pct_identity)/len(list_pct_identity)
+			logger.info("L_ratio is %f" %L_ratio)
+			return L_ratio
+		else:
+			raise Exception("Couldn't find blast_all_v_all for cluster %s (index=%s)" % (
+					self.cluster_id, str(self.index)))
+
 
 
 	def get_data_matrix_size(self, estimated=False):

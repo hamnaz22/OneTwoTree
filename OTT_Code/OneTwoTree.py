@@ -1,6 +1,7 @@
 import sys
 
-ONE_TWO_TREE_PATH = '/bioseq/oneTwoTree_DEBUG/'
+ONE_TWO_TREE_PATH = '/bioseq/oneTwoTree/'
+#ONE_TWO_TREE_PATH = '/groups/itay_mayrose/michaldrori/PROJECTS/OTT/OTT_V_1p2/'
 
 import os
 import csv
@@ -12,33 +13,43 @@ import shutil
 def create_job_file(job_name, command_align, email_start_cmd, email_end_cmd, file_name, output_path):
 
 	with open(file_name, "w") as handle:
-		handle.write("#!/bin/tcsh\n\n")			# #!/bin/bash
-		handle.write("#$ -N " + job_name + "\n")
-		handle.write("#$ -S /bin/tcsh\n")               # # $ -S /bin/bash
-		handle.write("#$ -cwd\n")
-		#handle.write("#$ -l itaym\n")
-		handle.write("#$ -l 12tree\n")
-		#handle.write("#$ -q 12tree.q\n")
-		handle.write("#$ -e " + output_path + "$JOB_NAME.$JOB_ID.ER\n")
-		handle.write("#$ -o " + output_path + "$JOB_NAME.$JOB_ID.OU\n")
+		handle.write("#!/bin/bash\n\n")			# #!/bin/bash
+		handle.write("#PBS -N " + job_name + "\n")
+		#handle.write("#PBS -j oe\n")
+		handle.write("#PBS -r y\n")
+		#handle.write("#PBS -q itaym\n")
+		handle.write("#PBS -q lifesciweb\n")
+		handle.write("#PBS -l select=1:ncpus=2:mem=1gb\n")
+		handle.write("#PBS -v PBS_O_SHELL=bash,PBS_ENVIRONMENT=PBS_BATCH\n")
+		handle.write("#PBS -e " + output_path + "\n")
+		handle.write("#PBS -o " + output_path + "\n")
 		handle.write("cd " + output_path + "\n")
 		#handle.write("module load python/python-3.3.0\n")
-		handle.write("module load python/anaconda3-5.0.0\n")
+		handle.write("module load python/python-anaconda3.6.5-michaldrori\n")
 		handle.write("module load blast/blast230\n")
 		handle.write("module load mrbayes/mrbayes_3.2.2\n")
 		handle.write("module load Gblocks_0.91b\n")
+		handle.write("module load R/3.5.1\n")
 		handle.write("module load treePL-1\n")
-		handle.write("module load perl/perl-5.16.3\n")
-		handle.write("module load mafft/mafft7149\n")
+		handle.write("module load pll-dppdiv-master\n")
+		#handle.write("module load perl/perl-5.26\n")
+		#handle.write("module unload gcc/gcc480\n")
+		handle.write("module load gcc/gcc620\n") #Jekyl
+		#handle.write("module load gcc/gcc-7.3.0\n")
+		#handle.write("module load mafft/mafft-7149-new\n") #Jekyl
+		handle.write("module load mafft/mafft7149\n") #Jekyl
+		#handle.write("module load mafft/mafft-7.407\n")
 		handle.write("module load java/java-1.8\n")
-		handle.write("setenv LANG aa_DJ.utf8\n")
+		handle.write("export LANG=aa_DJ.utf8\n")
 		handle.write("module load raXML\n")
-		handle.write("module unload gcc/gcc480\n")
-		handle.write("module load gcc/gcc620\n")
+		handle.write("module load ExaML/examl-2018\n")
 		handle.write("module load cdhit/cd-hit-4.7\n")
-		handle.write("setenv LD_LIBRARY_PATH ${LD_LIBRARY_PATH}:/opt/openmpi/lib\n")
+		handle.write("module load mpi/openmpi-1.10.4\n")
 		handle.write("module load rocks-openmpi\n")
-		#handle.write("module load openmpi-x86_64\n")
+		handle.write("export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/openmpi/lib\n")
+		handle.write("export PYTHONPATH=/bioseq/oneTwoTree\n")
+		handle.write("module load rocks-openmpi\n")
+		
 		handle.write("hostname;\n")
 
 		# Alignment code:
@@ -51,33 +62,42 @@ def create_job_file(job_name, command_align, email_start_cmd, email_end_cmd, fil
 def create_Spesific_job_file(job_name, command, file_name, error_files_path):
 
 	with open(file_name, "w") as handle:
-		handle.write("#!/bin/tcsh\n\n")			# #!/bin/bash
-		handle.write("#$ -N " + job_name + "\n")
-		handle.write("#$ -S /bin/tcsh\n")               # # $ -S /bin/bash
-		handle.write("#$ -cwd\n")
-		#handle.write("#$ -l itaym\n")
-		handle.write("#$ -l 12tree\n")
-		#handle.write("#$ -q 12tree.q\n")
-		handle.write("#$ -e " + error_files_path + "$JOB_NAME.$JOB_ID.ER\n")
-		handle.write("#$ -o " + error_files_path + "$JOB_NAME.$JOB_ID.OU\n")
+		handle.write("#!/bin/bash\n\n")			# #!/bin/bash
+		handle.write("#PBS -N " + job_name + "\n")
+		#handle.write("#PBS -j oe\n")
+		handle.write("#PBS -r y\n")
+		handle.write("#PBS -q lifesciweb\n")
+		handle.write("#PBS -l select=1:ncpus=2:mem=1gb\n")
+		handle.write("#PBS -v PBS_O_SHELL=bash,PBS_ENVIRONMENT=PBS_BATCH\n")
+		handle.write("#PBS -e " + error_files_path +" \n")
+		handle.write("#PBS -o " + error_files_path + "\n")
 		handle.write("cd " + error_files_path + "\n")
 		#handle.write("module load python/python-3.3.0\n")
-		handle.write("module load python/anaconda3-5.0.0\n")
+		handle.write("module load python/python-anaconda3.6.5-michaldrori\n")
 		handle.write("module load blast/blast230\n")
 		handle.write("module load mrbayes/mrbayes_3.2.2\n")
 		handle.write("module load Gblocks_0.91b\n")
+		handle.write("module load R/3.5.1\n")
 		handle.write("module load treePL-1\n")
-		handle.write("module load perl/perl-5.16.3\n")
-		handle.write("module load mafft/mafft7149\n")
+		handle.write("module load pll-dppdiv-master\n")
+		#handle.write("module unload gcc/gcc480\n")
+		handle.write("module load gcc/gcc620\n") #Jekyl
+		#handle.write("module load gcc/gcc-7.3.0\n")
+		#handle.write("module load perl/perl-5.26\n")
+		#handle.write("module load mafft/mafft-7149-new\n") #Jekyl
+		handle.write("module load mafft/mafft7149\n") #Jekyl
+		#handle.write("module load mafft/mafft-7.407\n")
+		#handle.write("module load mafft/mafft-7.407\n")
 		handle.write("module load java/java-1.8\n")
-		handle.write("setenv LANG aa_DJ.utf8\n")
+		handle.write("export LANG aa_DJ.utf8\n")
 		handle.write("module load raXML\n")
+		handle.write("module load ExaML/examl-2018\n")
 		handle.write("module load rocks-openmpi\n")
+		handle.write("module load mpi/openmpi-1.10.4\n")
 		handle.write("module load openmpi-x86_64\n")
-		handle.write("module unload gcc/gcc480\n")
-		handle.write("module load gcc/gcc620\n")
 		handle.write("module load cdhit/cd-hit-4.7\n")
-		handle.write("setenv LD_LIBRARY_PATH ${LD_LIBRARY_PATH}:/opt/openmpi/lib\n")
+		handle.write("export LD_LIBRARY_PATH ${LD_LIBRARY_PATH}:/opt/openmpi/lib\n")
+		handle.write("export PYTHONPATH=/bioseq/oneTwoTree\n")
 		handle.write("hostname;\n")
 		handle.write(command + "\n")
 	return file_name
@@ -139,7 +159,7 @@ shutil.copyfile(species_list_file,OUTPUT_OTT_PATH + "/taxa_list.txt")
 align_script = ONE_TWO_TREE_PATH + 'buildTaxaTree.py'
 align_ini = ONE_TWO_TREE_PATH + 'OneTwoTree.ini'
 
-cmd = "python " + align_script + " --taxa-list-file taxa_list.txt --working-dir " + OUTPUT_OTT_PATH + "/ --config-filename " + align_ini \
+cmd = "python " + align_script + " --taxa-list-file " + OUTPUT_OTT_PATH + "/taxa_list.txt --working-dir " + OUTPUT_OTT_PATH + "/ --config-filename " + align_ini \
 	 + " --id " + JobName \
 
 errorFilePath = OUTPUT_OTT_PATH  + "/"

@@ -100,6 +100,51 @@ def split_blast_by_taxon_ids(in_blast_filename,work_dir,taxon_ids,seq_data):
 		logger.info("DONE Splitting BLAST results into separate files, per taxon")
 		return taxon_to_filenames
 
+# Given blast results the function will remove all rows where the alignment doesn't cover at least 50% of the sequences
+# MichalDrori: Check new version to expand blast check of taxAccession vs all accession in cluster:
+def split_blast_by_taxon_ids_MDebug(in_blast_filename,work_dir,taxon_ids,seq_data):
+	logger.info("Splitting BLAST results into separate files, per taxon")
+	rows_dict = dict()
+
+	for taxon_id in taxon_ids:
+		rows_dict[taxon_id] = list()
+
+	with open(in_blast_filename) as f:
+		dr = csv.DictReader(f, delimiter='\t',fieldnames=['query_id','subject_id','pct_identity','align_len','mismatches',
+														  'gap_openings','q_start','q_end','s_start','s_end','eval','bitscore'])
+
+		logger.info("Filtering the blast results keeping only relevant results for multiple accessions")
+		for next_row in dr:
+			qid = next_row['query_id']
+			sid = next_row['subject_id']
+			taxon_qid = seq_data.blast_key_to_taxon[qid]
+			gi_qid = seq_data.blast_key_to_gi[qid]
+			taxon_sid = seq_data.blast_key_to_taxon[sid]
+			gi_sid = seq_data.blast_key_to_gi[sid]
+
+			#if taxon_qid == taxon_sid and taxon_qid in taxon_ids:
+			if taxon_qid in taxon_ids:
+				gis = seq_data.taxon_to_gis_dict[taxon_qid]
+				#if qid != sid and (gi_qid in gis or gi_sid in gis):
+				if qid != sid and (gi_qid in gis or gi_sid in gis):
+					rows_dict[taxon_qid].append(next_row)
+
+		taxon_to_filenames = dict()
+
+		logger.info("Writing the blast results into seperate files")
+		for taxon_id in rows_dict:
+			taxon_filename = os.path.join(work_dir,taxon_id + "-blast.csv")
+			taxon_to_filenames[taxon_id] = taxon_filename
+			with open(taxon_filename,"w", encoding='utf8', newline='') as handle:
+				csv_writer = csv.writer(handle,delimiter='\t')
+				for row in rows_dict[taxon_id]:
+					row_to_write = [row['query_id'],row['subject_id'],row['pct_identity'],row['align_len'],row['mismatches'],
+														  row['gap_openings'],row['q_start'],row['q_end'],row['s_start'],row['s_end'],row['eval'],row['bitscore']]
+					csv_writer.writerow(row_to_write)
+
+		logger.info("DONE Splitting BLAST results into separate files, per taxon")
+		return taxon_to_filenames
+
 
 def get_taxon_gis_key(gi1,gi2):
 	key = "$".join([gi1,gi2])
@@ -122,7 +167,6 @@ def get_relevant_seqids(fasta_filename):
 	logger.info("Looking for GIs in %s - here is the GI list %s" % (fasta_filename,",".join(seqids)))
 
 	return seqid_to_seq
-
 
 def get_seq_with_max_average_blast_score(taxon_fasta_filename,taxon_blast_filename):
 	seqids_to_seq = get_relevant_seqids(taxon_fasta_filename)
@@ -168,6 +212,60 @@ def get_seq_with_max_average_blast_score(taxon_fasta_filename,taxon_blast_filena
 	logger.info("Max average bitscore is %f for %s .Found the following average bit scores per GI %s" % (max_average_bitscore,max_seqid,seqid_to_average_score))
 	return seqids_to_seq[max_seqid]
 
+
+def get_seq_with_max_average_blast_score_MDebug(taxon_fasta_filename,taxon_blast_filename):
+	seqids_to_seq = get_relevant_seqids(taxon_fasta_filename)
+
+	logger.debug("Generating dictionary of bitscores between seqs according to %s" % taxon_blast_filename)
+	with open(taxon_blast_filename) as f:
+		dr = csv.DictReader(f, delimiter='\t',fieldnames=['query_id','subject_id','pct_identity','align_len','mismatches',
+														  'gap_openings','q_start','q_end','s_start','s_end','eval','bitscore'])
+		max_score_dict = dict()
+		all_seq_ids = []
+		for row in dr:
+			row_key = get_row_key(row)
+			query_id = row['query_id']
+			sub_id = row['subject_id']
+			if query_id not in all_seq_ids:
+				all_seq_ids.append(query_id)
+			if sub_id not in all_seq_ids:
+				all_seq_ids.append(sub_id)
+			#logger.debug("Adding the following key %s" % row_key)
+			if row_key not in max_score_dict:
+				max_score_dict[row_key] = -1.0
+			score = float(row['bitscore'])
+			if max_score_dict[row_key] < score:
+				max_score_dict[row_key] = score
+
+	seqid_to_average_score = dict()
+	missing_keys = list()
+	#logger.debug("MDebug : max_score_dict\n")
+	#logger.debug(max_score_dict)
+	for seqid in seqids_to_seq:
+		average_bit_score = 0.0
+		for other_seqid in all_seq_ids:
+			if seqid != other_seqid:
+				key = get_taxon_gis_key(seqid,other_seqid)
+				if key not in max_score_dict:
+					missing_keys.append(key)
+				else:
+					average_bit_score = average_bit_score + max_score_dict[key]
+		average_bit_score /= len(seqids_to_seq) - 1
+		seqid_to_average_score[seqid] = average_bit_score
+	if len(missing_keys) > 0:
+		logger.error("Didn't find the following keys in blast file %s: %s" % (taxon_blast_filename, ",".join(missing_keys)))
+
+	max_seqid = None
+	max_average_bitscore = -1
+	for seqid in seqid_to_average_score:
+		# second check is done in order to make sure this method will always return the same seqid in case there are several seqs with the same average_bitscore
+		if (max_average_bitscore < seqid_to_average_score[seqid]) or (max_average_bitscore == seqid_to_average_score[seqid] and seqid > max_seqid) :
+			max_average_bitscore = seqid_to_average_score[seqid]
+			max_seqid = seqid
+
+	logger.info("Max average bitscore is %f for %s .Found the following average bit scores per GI %s" % (max_average_bitscore,max_seqid,seqid_to_average_score))
+	return seqids_to_seq[max_seqid]
+
 class SeqData:
 
 	def __init__(self):
@@ -190,7 +288,8 @@ def handle_multiple_accessions(in_seqs_filename,in_blast_filename,work_dir,out_f
 		if seq_data.taxon_to_seqno[taxon_id] > 1:
 			taxon_ids_for_multiple_acc.append(taxon_id)
 
-	taxon_to_blast_filenames = split_blast_by_taxon_ids(in_blast_filename,work_dir,taxon_ids_for_multiple_acc,seq_data)
+	#taxon_to_blast_filenames = split_blast_by_taxon_ids(in_blast_filename,work_dir,taxon_ids_for_multiple_acc,seq_data)
+	taxon_to_blast_filenames = split_blast_by_taxon_ids_MDebug(in_blast_filename,work_dir,taxon_ids_for_multiple_acc,seq_data)
 
 	logger.debug("About to iterate %d taxons, handling mult accession for each if needed" % (len(seq_data.taxon_to_filenames)))
 	seqs_after_mult_acc = list()
@@ -199,7 +298,8 @@ def handle_multiple_accessions(in_seqs_filename,in_blast_filename,work_dir,out_f
 		if taxon_id in taxon_ids_for_multiple_acc:
 			logger.info("taxonid = %s - handling multiple accessions" % taxon_id)
 			taxon_blast_filename = taxon_to_blast_filenames[taxon_id]
-			representative_seq = get_seq_with_max_average_blast_score(taxon_fasta_filename,taxon_blast_filename)
+			#representative_seq = get_seq_with_max_average_blast_score(taxon_fasta_filename,taxon_blast_filename)
+			representative_seq = get_seq_with_max_average_blast_score_MDebug(taxon_fasta_filename,taxon_blast_filename)
 		else:
 			#logger.debug("taxonid = %s - no need for handling multiple accessions since there is just one seq" % taxon_id)
 			with open(taxon_fasta_filename) as handle:

@@ -13,7 +13,7 @@ GetOptions(
 	"id=s"     => \$id
 );
 
-my $from = 'evolseq@post.tau.ac.il';
+my $from = 'evolseq@tauex.tau.ac.il';
 
 my $subject;
 my $subject_fail = "Your OneTwoTree job $id $jobTitle has failed";

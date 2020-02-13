@@ -160,15 +160,15 @@ def exec_external_command_redirect_output(command_to_exec, outfile=None, errfile
 
 	logger.info("Executing the following command %s - out written to %s error written to %s", command_to_exec, outfile,
 				errfile)
-	logger.info("cwd=%s" % cwd)
+	#logger.info("cwd=%s" % cwd)
 	p = subprocess.Popen(command_to_exec, shell=True, cwd=cwd, stdout=command_out, stderr=command_err)
 	# Added by Michal - Stuck in some cases (large input files for formatdb
 	stdout, stderr = p.communicate()
 	retval = p.wait()
 
-	if retval == 0:
-		logger.info("Execution return code was %i for command %s" % (retval, command_to_exec))
-	else:
+	if retval != 0:
+		#logger.info("Execution return code was %i for command %s" % (retval, command_to_exec))
+	#else:
 		logger.error("Execution return code was %i for command %s" % (retval, command_to_exec))
 		raise Exception("Failed cmd")
 
@@ -245,8 +245,8 @@ def get_seq_organism(seq, synonym_dict):
 def restandarize_seq_short(seq):
 	#seqid = getPropertyFromFastaSeqHeader(seq.description, "seqid")
 	seqid = getPropertyFromFastaSeqHeader(seq.description, "gi")
-	seq.description = "%s" % (seqid)
-
+	if seqid is not None:
+		seq.description = "%s" % (seqid)
 
 def restandarize_seq(seq, gi=None, taxonid=None, organism=None, original_organism=None, description=None, seqid=None,
 					 original_taxonid=None, original_subsp_organism=None, original_subsp_taxonid=None):
@@ -469,7 +469,8 @@ def concat_fasta_cluster(clusters, workdir, concat_fasta, concat_outgroup_fasta=
 			SeqIO.write(unique_outgroup_recs, concat_outgroup_handle, "fasta")
 
 	#run_dos2unix(indexFileName)
-	concat_align_command = "perl /groups/pupko/haim/pupkoSVN/trunk/programs/indelReliability/ConcateAlignments.pl %s %s %s NO NA NA" % \
+	concatAlignPAth = ott_config['general']['OTT_MAIN'] + '/ott_scripts'
+	concat_align_command = "perl " + concatAlignPAth + "/ConcateAlignments.pl %s %s %s NO NA NA" % \
 						   (indexFileName, concat_fasta, workdir + "/concat-report.txt")
 	exec_external_command_redirect_output(concat_align_command, workdir + "/concat.out", workdir + "/concat.err")
 
@@ -497,6 +498,8 @@ def escape_organism_name(organism_name):
 	escaped_organism = escaped_organism.replace("-", "_")
 	escaped_organism = escaped_organism.replace("(", "")
 	escaped_organism = escaped_organism.replace(")", "")
+	escaped_organism = escaped_organism.replace("[", "")
+	escaped_organism = escaped_organism.replace("]", "")
 
 	escaped_organism = escaped_organism.replace("'", "_")
 	escaped_organism = escaped_organism.replace("/", "_")
@@ -511,8 +514,13 @@ def rewrite_fasta_with_organism_name_as_desc(in_fasta_filename, out_organism_des
 
 	names_dict = dict()
 	for seq_record in SeqIO.parse(in_fasta_filename, "fasta"):
-		organism = getPropertyFromFastaSeqHeader(seq_record.description, "organism")
-		original_organism = organism
+		#Fix for cases of ITS clusters without the complete sequence description line:
+		if 'organism' not in seq_record.description:
+			organism = seq_record.description
+			original_organism = seq_record.description
+		else:
+			organism = getPropertyFromFastaSeqHeader(seq_record.description, "organism")
+			original_organism = organism
 
 		logger.debug("rewriting %s" % organism)
 		organism = escape_organism_name(original_organism)
@@ -735,8 +743,18 @@ def get_number_of_different_species(fasta_file):
 def get_list_of_species(fasta_file):
 	different_taxons = set()
 	all_seqs = list(SeqIO.parse(fasta_file, "fasta"))
+	#logger.debug("get list from fasta: %s" %fasta_file)
+
+	logger.debug("get_list_of_species\n")
+	logger.debug("On %s\n" %fasta_file)
 	for seq in all_seqs:
-		taxonid = getPropertyFromFastaSeqHeader(seq.description, "taxonid")
+
+		logger.debug("%s\n" %seq.description)
+		#For ITS files check if full header:
+		if '|' not in seq.description:
+			taxonid = seq.description.replace('_',' ')
+		else:
+			taxonid = getPropertyFromFastaSeqHeader(seq.description, "taxonid")
 		if taxonid not in different_taxons:
 			different_taxons.add(taxonid)
 	# logger.debug("Found %d different taxons for %d seqs in the file %s" % (len(different_taxons),len(all_seqs),fasta_file))
@@ -751,12 +769,20 @@ def get_cluster_ids_total_seq_len(ploidb_context, cluster_ids):
 		total_seq_len += c.get_cluster_length(estimated=True)
 	return total_seq_len
 
+def get_cluster_L_ratio(ploidb_context, cluster_ids):
+	# logger.debug("Getting total seq len for %s" % ",".join(cluster_ids))
+	total_seq_len = 0
+	for c in ploidb_context.get_clusters_by_ids(cluster_ids):
+		L_ratio = c.get_cluster_L_ratio(ploidb_context)/100
+		return L_ratio
+
 
 def use_cache_results_if_exists(file_for_hash, file_to_check_in_cache, genus_name, cache_prefix):
 	cache_flag = ott_config.getboolean('general', 'use_cache')
 
 	if not cache_flag:
 		logger.debug("use_cache flag is down - will not use cache ")
+		logger.debug("genus_name - %s" %genus_name)
 		return False
 
 	if genus_name is None:
